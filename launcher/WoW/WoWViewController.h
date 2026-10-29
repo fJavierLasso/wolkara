@@ -16,5 +16,10 @@ NS_ASSUME_NONNULL_BEGIN
 @property(nonatomic, readonly) UIButton *diagnosticsButton;
 - (void)beginStartup;
 - (void)finishStartupWithMessage:(NSString *)message failed:(BOOL)failed;
+- (void)openAddons;
+- (void)promptForAPIKey;
+- (void)checkAddonUpdatesPromptUser:(BOOL)promptUser;
+- (void)exportBackup;
+- (void)importBackup;
 @end
 NS_ASSUME_NONNULL_END
