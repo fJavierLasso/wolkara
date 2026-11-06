@@ -2,9 +2,11 @@
 #import "TouchGamepadLayout.h"
 #import "AKHostLocalization.h"
 #import "TouchHaptics.h"
+#import "TouchStickButtons.h"
 #import "TouchActionInput.h"
 #import "TouchActionOverlay.h"
 #include <math.h>
+#import <UIKit/UIGestureRecognizerSubclass.h>
 
 CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
     if (!isfinite(point.x) || !isfinite(point.y) || !isfinite(size.width) || !isfinite(size.height) ||
@@ -17,6 +19,24 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
     CGFloat scale = MIN(1,(length - 0.10) / 0.90) / length;
     return CGPointMake(x * scale,y * scale);
 }
+
+// Reject a camera/stick drag at the same threshold as the direct-touch host.
+// UIKit handles tap count and timing; no movement or button event is replayed.
+@interface AKStickDoubleTap : UITapGestureRecognizer
+@end
+@implementation AKStickDoubleTap { CGPoint _tapOrigin; }
+- (void)touchesBegan:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
+    _tapOrigin = [touches.anyObject locationInView:self.view];
+    [super touchesBegan:touches withEvent:event];
+}
+- (void)touchesMoved:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
+    CGPoint point = [touches.anyObject locationInView:self.view];
+    if (hypot(point.x-_tapOrigin.x, point.y-_tapOrigin.y) >= AKTouchDragThreshold) {
+        self.state = UIGestureRecognizerStateFailed; return;
+    }
+    [super touchesMoved:touches withEvent:event];
+}
+@end
 
 @interface AKGamepadButton : UIButton
 @property(nonatomic, copy) NSString *element;
@@ -142,7 +162,7 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
     UIView *_settings;
     UIButton *_editDone;
     UILabel *_hint;
-    UISwitch *_editSwitch, *_hapticsSwitch, *_swapShouldersSwitch;
+    UISwitch *_editSwitch, *_hapticsSwitch, *_swapShouldersSwitch, *_performanceSwitch;
     UIStackView *_settingsColumns;
     NSArray<UISlider *> *_sliders;
     NSArray<UILabel *> *_values;
@@ -271,6 +291,14 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
 - (void)place:(NSString *)name frame:(CGRect)frame baseSize:(CGSize)base safe:(CGRect)safe {
     NSString *control = [self positionName:name];
     UIView *item = _items[control];
+    if (_simple && [@[@"LB",@"RB"] containsObject:control]) {
+        // Green/red target icons above the neutral abilities in the 1280x900
+        // reference. Follow the ability block's anchor and scale, regardless
+        // of Full's shoulder swap. Explicit Simple positions still win below.
+        CGPoint reference = CGPointMake([control isEqual:@"LB"] ? 507-640 : 772-640,568-700);
+        CGPoint center = [_actions.layout pointForPosition:reference inBounds:self.bounds];
+        frame.origin = CGPointMake(center.x-frame.size.width/2,center.y-frame.size.height/2);
+    }
     CGRect placed = [_preferences frameForItem:[self preferenceKeyForControl:control] defaultFrame:frame inBounds:safe];
     item.transform = CGAffineTransformIdentity; item.bounds = (CGRect){CGPointZero,base};
     item.center = CGPointMake(CGRectGetMidX(placed),CGRectGetMidY(placed));
@@ -407,6 +435,13 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
     UIStackView *hapticsRow = [[UIStackView alloc] initWithArrangedSubviews:@[[self label:AKHostLocalized(@"touch.settings.haptics")],_hapticsSwitch]];
     hapticsRow.axis = UILayoutConstraintAxisHorizontal; hapticsRow.alignment = UIStackViewAlignmentCenter;
     [options addArrangedSubview:hapticsRow];
+    _performanceSwitch = [UISwitch new]; _performanceSwitch.on = _preferences.performanceOverlayEnabled;
+    _performanceSwitch.accessibilityLabel = AKHostLocalized(@"touch.settings.overlay.detail");
+    _performanceSwitch.accessibilityIdentifier = @"wolkara.controls.performance";
+    [_performanceSwitch addTarget:self action:@selector(performanceChanged:) forControlEvents:UIControlEventValueChanged];
+    UIStackView *performanceRow = [[UIStackView alloc] initWithArrangedSubviews:@[[self label:AKHostLocalized(@"touch.settings.overlay.detail")],_performanceSwitch]];
+    performanceRow.axis = UILayoutConstraintAxisHorizontal; performanceRow.alignment = UIStackViewAlignmentCenter;
+    [options addArrangedSubview:performanceRow];
     _editSwitch = [UISwitch new]; _editSwitch.accessibilityLabel = AKHostLocalized(@"touch.settings.edit");
     _editSwitch.accessibilityIdentifier = @"wolkaraforever.controls.edit";
     [_editSwitch addTarget:self action:@selector(beginEditing:) forControlEvents:UIControlEventValueChanged];
@@ -460,10 +495,13 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
     if (self.configurationChanged) self.configurationChanged();
 }
 
+- (void)performanceChanged:(UISwitch *)sender {
+    _preferences.performanceOverlayEnabled = sender.on; [_preferences save];
+}
 - (void)beginEditing:(UISwitch *)sender {
     if (!sender.on) return;
     [self reset]; _editing = YES; [_settings removeFromSuperview]; _settings = nil;
-    _sliders = nil; _values = nil; _editSwitch = nil; _hapticsSwitch = nil; _swapShouldersSwitch = nil; _settingsColumns = nil;
+    _sliders = nil; _values = nil; _editSwitch = nil; _hapticsSwitch = nil; _swapShouldersSwitch = nil; _performanceSwitch = nil; _settingsColumns = nil;
     [self updateAppearance]; if (self.configurationChanged) self.configurationChanged();
 }
 - (void)editAbilities {
@@ -475,12 +513,13 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
     [self reset]; [_preferences reset];
     _sliders[0].value = 1-_preferences.opacity; _sliders[1].value = _preferences.rearScale; _sliders[2].value = _preferences.frontScale;
     _hapticsSwitch.on = _preferences.hapticsEnabled; _swapShouldersSwitch.on = !_preferences.swapShoulders;
+    _performanceSwitch.on = _preferences.performanceOverlayEnabled;
     [self updateValues]; [self updateAppearance];
 }
 - (void)finishConfiguration {
     [_actions finishEditing];
     [self reset]; [_preferences save]; _editing = NO; [_dragOrigins removeAllObjects];
-    [_settings removeFromSuperview]; _settings = nil; _sliders = nil; _values = nil; _editSwitch = nil; _hapticsSwitch = nil; _swapShouldersSwitch = nil; _settingsColumns = nil;
+    [_settings removeFromSuperview]; _settings = nil; _sliders = nil; _values = nil; _editSwitch = nil; _hapticsSwitch = nil; _swapShouldersSwitch = nil; _performanceSwitch = nil; _settingsColumns = nil;
     [self updateAppearance]; if (self.configurationChanged) self.configurationChanged();
 }
 - (void)reset {
@@ -490,12 +529,17 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
 }
 @end
 
+@interface AKTouchGamepad () <UIGestureRecognizerDelegate>
+@end
+
 @implementation AKTouchGamepad {
     __weak UIView *_host;
     GCVirtualController *_virtualController;
     AKGamepadOverlay *_overlay;
     AKTouchHaptics *_haptics;
     AKTouchActionInput *_actionInput;
+    UITapGestureRecognizer *_leftDoubleTap, *_rightDoubleTap, *_areaDoubleTap;
+    NSTimer *_leftClickTimer, *_rightClickTimer;
     BOOL _active, _connecting, _cancelConnect, _failed, _invalidated;
 }
 - (instancetype)initWithHostView:(UIView *)host {
@@ -542,9 +586,14 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
             UIView<AKTouchDragHost> *host=(id)self->_host;
             if ([host conformsToProtocol:@protocol(AKTouchDragHost)]) [host ak_endTouchDrag:touch cancelled:cancelled];
         };
+        _leftDoubleTap = [self installDoubleTapOn:_overlay.leftStick selector:@selector(leftStickDoubleTapped:) background:NO];
+        _rightDoubleTap = [self installDoubleTapOn:_overlay.rightStick selector:@selector(rightStickDoubleTapped:) background:NO];
+        _areaDoubleTap = [self installDoubleTapOn:host selector:@selector(rightStickDoubleTapped:) background:YES];
+        _overlay.leftStick.accessibilityHint = AKHostLocalized(@"touch.gamepad.leftStick.hint");
+        _overlay.rightStick.accessibilityHint = AKHostLocalized(@"touch.gamepad.rightStick.hint");
         _overlay.configurationChanged = ^{
             AKTouchGamepad *self = weakSelf;
-            if (self && self->_overlay.configuring) [self->_actionInput releaseAll];
+            if (self && self->_overlay.configuring) { [self cancelStickClicks]; [self->_actionInput releaseAll]; }
             [self updateHaptics];
             if (self.visibilityChanged) self.visibilityChanged(self.visible);
         };
@@ -570,7 +619,62 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
 - (AKGamepadLayout *)layout { return _overlay.preferences; }
 - (NSArray<GCController *> *)connectedControllers { return GCController.controllers; }
 - (AKTouchHaptics *)makeHaptics { return [AKTouchHaptics new]; }
-- (void)updateHaptics { _haptics.enabled = _visible && !_overlay.configuring && _overlay.preferences.hapticsEnabled; }
+- (void)updateHaptics {
+    BOOL input = _visible && !_overlay.configuring;
+    _haptics.enabled = input && _overlay.preferences.hapticsEnabled;
+    _leftDoubleTap.enabled = _areaDoubleTap.enabled = input;
+    _rightDoubleTap.enabled = input && !_simple;
+}
+- (UITapGestureRecognizer *)installDoubleTapOn:(UIView *)view selector:(SEL)selector background:(BOOL)background {
+    UITapGestureRecognizer *tap = [[AKStickDoubleTap alloc] initWithTarget:self action:selector];
+    tap.numberOfTapsRequired = 2; tap.numberOfTouchesRequired = 1;
+    tap.allowedTouchTypes = @[@(UITouchTypeDirect)];
+    tap.delegate = self; tap.enabled = NO;
+    tap.delaysTouchesBegan = NO; // Movement starts immediately.
+    // On bare game content, wait to distinguish single click from R3. UIKit
+    // cancels both taps on recognition; a failed double tap delivers the click.
+    // Joysticks must return to neutral immediately when each finger lifts.
+    tap.delaysTouchesEnded = background; tap.cancelsTouchesInView = background;
+    [view addGestureRecognizer:tap]; return tap;
+}
+- (BOOL)gestureRecognizer:(UIGestureRecognizer *)gesture shouldReceiveTouch:(UITouch *)touch {
+    if (!_visible || _overlay.configuring || _keyboardVisible || touch.type != UITouchTypeDirect) return NO;
+    if (gesture == _areaDoubleTap) {
+        if (touch.view != _host) return NO; // Toolbar, HUD, abilities and other controls win.
+        CGRect safe = UIEdgeInsetsInsetRect(_host.bounds,_host.safeAreaInsets);
+        CGPoint point = [touch locationInView:_host];
+        return CGRectContainsPoint(safe,point) && point.x >= CGRectGetMidX(safe) && point.y >= CGRectGetMidY(safe);
+    }
+    return gesture == _leftDoubleTap || (gesture == _rightDoubleTap && !_simple);
+}
+- (void)leftStickDoubleTapped:(UITapGestureRecognizer *)gesture {
+    if (gesture.state == UIGestureRecognizerStateRecognized) [self clickStick:YES];
+}
+- (void)rightStickDoubleTapped:(UITapGestureRecognizer *)gesture {
+    if (gesture.state == UIGestureRecognizerStateRecognized) [self clickStick:NO];
+}
+- (void)clickStick:(BOOL)left {
+    if (!_visible || _overlay.configuring || _keyboardVisible) return;
+    NSString *button = left ? GCInputLeftThumbstickButton : GCInputRightThumbstickButton;
+    if ([_actionInput.pressedButtons containsObject:button]) return;
+    [_actionInput setManualButton:button pressed:YES]; [_haptics buttonPressed];
+    __weak AKTouchGamepad *weakSelf = self;
+    NSTimer *timer = [NSTimer timerWithTimeInterval:0.08 repeats:NO block:^(NSTimer *timer) {
+        (void)timer;
+        AKTouchGamepad *self = weakSelf; if (!self) return;
+        [self->_actionInput setManualButton:button pressed:NO];
+        if (left) self->_leftClickTimer = nil; else self->_rightClickTimer = nil;
+    }];
+    if (left) _leftClickTimer = timer; else _rightClickTimer = timer;
+    [NSRunLoop.mainRunLoop addTimer:timer forMode:NSRunLoopCommonModes];
+}
+- (void)cancelStickClicks {
+    [_leftClickTimer invalidate]; [_rightClickTimer invalidate];
+    _leftClickTimer = _rightClickTimer = nil;
+    _leftDoubleTap.enabled = _rightDoubleTap.enabled = _areaDoubleTap.enabled = NO;
+    [_actionInput setManualButton:GCInputLeftThumbstickButton pressed:NO];
+    [_actionInput setManualButton:GCInputRightThumbstickButton pressed:NO];
+}
 - (GCVirtualController *)makeController {
     GCVirtualControllerConfiguration *configuration = [GCVirtualControllerConfiguration new];
     configuration.hidden = YES;
@@ -581,7 +685,9 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
     configuration.elements = [NSSet setWithArray:@[GCInputLeftThumbstick,GCInputRightThumbstick,
         GCInputButtonA,GCInputButtonB,GCInputButtonX,GCInputButtonY,
         GCInputLeftShoulder,GCInputRightShoulder,GCInputLeftTrigger,GCInputRightTrigger]];
-    return [[GCVirtualController alloc] initWithConfiguration:configuration];
+    GCVirtualController *controller = [[GCVirtualController alloc] initWithConfiguration:configuration];
+    AKRegisterTouchStickButtons(controller);
+    return controller;
 }
 - (BOOL)hostIsActive {
     UIWindow *window = _host.window;
@@ -614,6 +720,8 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
     [_actionInput setManualButton:names[button.element] ?: button.element pressed:button.pressed];
 }
 - (void)publishButton:(NSString *)button pressed:(BOOL)pressed {
+    if (([button isEqual:GCInputLeftThumbstickButton] || [button isEqual:GCInputRightThumbstickButton]) &&
+        AKSetTouchStickButton(_virtualController.controller,[button isEqual:GCInputLeftThumbstickButton],pressed)) return;
     if ([@[@"up",@"right",@"down",@"left"] containsObject:button]) {
         NSSet *held = _actionInput.pressedButtons;
         CGPoint value = CGPointMake([held containsObject:@"right"] - [held containsObject:@"left"],
@@ -635,10 +743,12 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
     GCVirtualController *controller = _virtualController;
     // Explicitly release our held controls before removing the virtual device.
     // No value or handler on a physical controller is changed.
+    [self cancelStickClicks];
     [_overlay reset];
     [_actionInput releaseAll];
     _virtualController = nil;
     [controller disconnect];
+    AKUnregisterTouchStickButtons(controller);
     [self setVisible:NO];
 }
 - (void)refresh {
@@ -693,9 +803,10 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
     if (_simple == simple) return;
     // Release held axes, buttons and pending ability chords before hiding any
     // controls. A layout change must not reconnect or replace the device.
+    [self cancelStickClicks];
     [_overlay reset];
     [_actionInput releaseAll];
-    _simple = simple; _overlay.simple = simple;
+    _simple = simple; _overlay.simple = simple; [self updateHaptics];
     if (self.visibilityChanged) self.visibilityChanged(_visible);
 }
 - (void)setEnabled:(BOOL)enabled {
@@ -711,10 +822,14 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
     _invalidated = YES;
     [NSNotificationCenter.defaultCenter removeObserver:self];
     [self refresh];
+    [_host removeGestureRecognizer:_areaDoubleTap];
     [_overlay removeFromSuperview];
 }
 - (void)dealloc {
     [NSNotificationCenter.defaultCenter removeObserver:self];
+    [_leftClickTimer invalidate]; [_rightClickTimer invalidate];
+    [_host removeGestureRecognizer:_areaDoubleTap];
     [_virtualController disconnect];
+    AKUnregisterTouchStickButtons(_virtualController);
 }
 @end

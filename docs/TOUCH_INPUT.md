@@ -18,6 +18,10 @@ Simple keeps the left analog stick without its directional ring, LB/RB, the menu
 button and enabled touch ability circles. It hides the right stick, A/B/X/Y ring
 and LT/RT. Move LB/RB in Settings → Edit layout while Simple is selected to save
 their positions separately from Full; each mode restores its own placement.
+By default, Simple places LB/RB over the green/red target icons above the neutral
+abilities in the reference screenshot. They follow the ability block's position
+and scale until moved manually; saved positions take priority. Full mode's
+shoulder swapping does not swap these default targets.
 Hidden areas pass touches to the camera or pointer. Changing the
 mode releases held inputs without reconnecting the controller or altering saved
 positions. Use Full to edit controls that are hidden in Simple.
@@ -145,3 +149,20 @@ cursor capture/warps, unchanged polled position on touch-down/restart, delta con
 at different touch positions and viewport sizes, tap intent, circle drag handoff,
 cancellation, finger ownership, trackpad movement and
 indirect pointer clicks. Its events are synthetic; it does not run a game.
+
+## Stick clicks
+
+While the virtual controller is active, double-tap the left stick for L3 or the
+right stick for R3. Bare game content in the lower-right safe-area quadrant also
+accepts R3, including in Simple mode. Controls and ability circles keep their own
+touch behavior; settings/editing, keyboard visibility and physical controllers
+disable these gestures. A drag defeats tap recognition at the camera threshold.
+A background single tap waits briefly to distinguish it from the R3 double tap.
+
+`TouchStickButtons` supplements missing buttons on our registered virtual
+controller using Apple's public writable snapshots. It extends only the owned
+profiles; physical controllers and unrelated snapshots are forwarded unchanged.
+The input fixture covers discovery, polling, button/profile notifications,
+captures and balanced press/release. Run `tools/test_touch_gamepad_ui.sh
+--self-test-input --unregistered-controller-test` for the separate isolation
+check (iOS permits only one active native virtual controller).

@@ -64,13 +64,22 @@
     UIView *target = [note.object isKindOfClass:UIView.class] ? note.object : nil;
     if (!target) return;
     NSString *action = note.userInfo[@"action"];
-    if ([action isEqualToString:@"start"]) {
-        if (_ownsDraft) return;
+    BOOL changingLanguage = [action isEqualToString:@"language"];
+    if ([action isEqualToString:@"start"] || changingLanguage) {
+        if (changingLanguage) {
+            if (!_ownsDraft || target != _target) return;
+            // Invalidate callbacks before cancelling. Restart only recognition;
+            // the chat is already open and must not receive another Return/Esc.
+            BOOL capturing = _capturing; _capturing = NO; ++_generation;
+            if (capturing) [_dictation cancel];
+        } else if (_ownsDraft) return;
         if (![self canReach:target]) {
+            if (changingLanguage) [self endDraftClosingChat:NO];
             [self publishForTarget:target state:@"idle" text:nil problem:@"No game text input is available."];
             return;
         }
         if (_dictation.state != AKDictationStateIdle || _dictation.transcriptHandler) {
+            if (changingLanguage) [self endDraftClosingChat:NO];
             [self publishForTarget:target state:@"idle" text:nil problem:@"Another dictation session is already active."];
             return;
         }
@@ -78,7 +87,7 @@
         _ownsDraft = _capturing = _openedChat = YES;
         NSUInteger generation = ++_generation;
         // Enter is the user's requested chat shortcut, not proof of guest focus.
-        [(id<AKToolbarTextTarget>)target touchSpecialKey:36 characters:@"\r"];
+        if (!changingLanguage) [(id<AKToolbarTextTarget>)target touchSpecialKey:36 characters:@"\r"];
         [self publishForTarget:target state:@"authorizing" text:@"" problem:nil];
         __weak AKToolbarDictationController *weakSelf = self;
         NSString *locale = [note.userInfo[@"locale"] isKindOfClass:NSString.class] ? note.userInfo[@"locale"] : nil;

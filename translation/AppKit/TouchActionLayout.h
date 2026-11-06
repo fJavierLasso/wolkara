@@ -17,6 +17,8 @@
 @property(nonatomic) CGPoint center;
 @property(nonatomic, readonly) NSArray<AKTouchAction *> *actions;
 - (CGFloat)unitScaleInBounds:(CGRect)bounds;
+// Convert a reference offset from the layout's center (640,700 in the photo).
+- (CGPoint)pointForPosition:(CGPoint)position inBounds:(CGRect)bounds;
 - (CGRect)frameForAction:(AKTouchAction *)action inBounds:(CGRect)bounds;
 - (void)moveGroupBy:(CGPoint)delta inBounds:(CGRect)bounds;
 - (void)moveAction:(AKTouchAction *)action by:(CGPoint)delta inBounds:(CGRect)bounds;

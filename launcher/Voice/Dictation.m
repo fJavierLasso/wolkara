@@ -235,6 +235,10 @@ double AKVoiceLoudestSample(void) { return AKLoudestSoFar; }
     SFSpeechAudioBufferRecognitionRequest *request = [SFSpeechAudioBufferRecognitionRequest new];
     request.requiresOnDeviceRecognition = onDevice;
     request.shouldReportPartialResults = YES;
+    // This is conversational text entry. Let Speech format complete sentences,
+    // including names and acronyms, rather than rewriting the transcript's case.
+    request.taskHint = SFSpeechRecognitionTaskHintDictation;
+    request.addsPunctuation = YES;
     request.contextualStrings = words;
     _request = request;
     __weak AKSpeechSession *weakSelf = self;
@@ -635,8 +639,8 @@ static __weak UIView *AKGameTextTarget = nil;
 - (BOOL)beginWithLocale:(NSString *)localeIdentifier progress:(void (^)(NSString *))progress completion:(AKDictationCompletion)completion {
     if (_state != AKDictationStateIdle || self.transcriptHandler || !completion) return NO;
     if (!_speech) {
-        // UITextInputMode supplies the last selected keyboard language without
-        // making the editor first responder. Emoji has no speech locale.
+        // The toolbar supplies its explicit, persisted speech language. Callers
+        // without a selection retain the system locale fallback.
         NSLocale *locale = localeIdentifier.length && ![localeIdentifier isEqualToString:@"emoji"] ?
             [NSLocale localeWithLocaleIdentifier:localeIdentifier] : NSLocale.currentLocale;
         _realSpeech = [[AKSpeechSession alloc] initWithLocale:locale];

@@ -6,6 +6,150 @@
 #import "AKSupport.h"
 #include <stdatomic.h>
 #include <dlfcn.h>
+#include <os/lock.h>
+#import <QuartzCore/QuartzCore.h>
+
+// Presentation-time frame statistics, for the optional performance HUD.
+//
+// This is measurement, not rendering: it only records the timestamps Metal
+// already reports when a drawable is presented, under a short lock. It reads no
+// guest memory, changes no drawable flag and never captures a frame. The HUD
+// looks these two functions up by name, so the adapter stays usable without it.
+#define AK_FPS_HISTORY_COUNT 60
+static double s_fpsTimestamps[AK_FPS_HISTORY_COUNT];
+static NSUInteger s_fpsHead = 0;
+static NSUInteger s_fpsCount = 0;
+static os_unfair_lock s_fpsLock = OS_UNFAIR_LOCK_INIT;
+static double s_cachedFPS = 0.0;
+static double s_lastFrameDurationMs = 0.0;
+static double s_lastPresentedAt = 0.0;
+
+void AKRecordMetalFramePresented(double timestamp) {
+    if (!isfinite(timestamp) || timestamp <= 0.0) return;
+    os_unfair_lock_lock(&s_fpsLock);
+    if (timestamp <= s_lastPresentedAt) { os_unfair_lock_unlock(&s_fpsLock); return; }
+    if (s_lastPresentedAt > 0 && timestamp - s_lastPresentedAt > 0.5) {
+        s_fpsCount = s_fpsHead = 0; s_cachedFPS = s_lastFrameDurationMs = 0;
+        s_lastPresentedAt = 0;
+    }
+    if (s_lastPresentedAt > 0.0) {
+        double delta = timestamp - s_lastPresentedAt;
+        if (delta > 0.0) s_lastFrameDurationMs = delta * 1000.0;
+    }
+    s_lastPresentedAt = timestamp;
+    s_fpsTimestamps[s_fpsHead] = timestamp;
+    s_fpsHead = (s_fpsHead + 1) % AK_FPS_HISTORY_COUNT;
+    if (s_fpsCount < AK_FPS_HISTORY_COUNT) s_fpsCount++;
+    if (s_fpsCount >= 2) {
+        NSUInteger oldest = (s_fpsHead + AK_FPS_HISTORY_COUNT - s_fpsCount) % AK_FPS_HISTORY_COUNT;
+        NSUInteger newest = (s_fpsHead + AK_FPS_HISTORY_COUNT - 1) % AK_FPS_HISTORY_COUNT;
+        double span = s_fpsTimestamps[newest] - s_fpsTimestamps[oldest];
+        if (span > 0.001) s_cachedFPS = (double)(s_fpsCount - 1) / span;
+    }
+    os_unfair_lock_unlock(&s_fpsLock);
+}
+
+__attribute__((visibility("default"))) double AKMetalCurrentFPS(void) {
+    os_unfair_lock_lock(&s_fpsLock);
+    double fps = s_cachedFPS;
+    double last = s_lastPresentedAt;
+    os_unfair_lock_unlock(&s_fpsLock);
+    // A stale average describes frames that are no longer arriving: report no
+    // measurement rather than a frame rate the game is not running at.
+    if (last > 0.0 && (CACurrentMediaTime() - last) > 0.5) return 0.0;
+    return fps;
+}
+
+__attribute__((visibility("default"))) double AKMetalLastFrameTimeMs(void) {
+    os_unfair_lock_lock(&s_fpsLock);
+    double ms = s_lastFrameDurationMs;
+    os_unfair_lock_unlock(&s_fpsLock);
+    return ms;
+}
+
+// How much of the frame the GPU was actually busy for.
+//
+// The frame interval alone cannot say whether a slow frame is the GPU or the
+// CPU: a 16.7 ms frame is "fine" whether the GPU took 16 ms of it or 6 ms with
+// 10 ms of drawing-code time in front. Metal reports both ends of the GPU's own
+// execution on a completed command buffer (gpuStartTime, gpuEndTime), so the
+// adapter records the interval of the buffer that presented the frame and the
+// sum of those intervals over a trailing second. GPU time close to the frame
+// interval means the GPU is the limit; far below it means the CPU is.
+static double s_lastGPUTimeMs = 0.0;
+static double s_gpuBusy = 0.0;
+static double s_gpuWindowStart = 0.0;
+static double s_gpuLoad = 0.0;
+
+void AKRecordMetalFrameGPU(double gpuStart, double gpuEnd) {
+    if (!isfinite(gpuStart) || !isfinite(gpuEnd) || !(gpuStart > 0.0) || !(gpuEnd > gpuStart)) return;
+    os_unfair_lock_lock(&s_fpsLock);
+    s_lastGPUTimeMs = (gpuEnd - gpuStart) * 1000.0;
+    if (s_gpuWindowStart <= 0.0 || gpuEnd < s_gpuWindowStart) s_gpuWindowStart = gpuEnd;
+    s_gpuBusy += gpuEnd - gpuStart;
+    double span = gpuEnd - s_gpuWindowStart;
+    if (span >= 1.0) {
+        s_gpuLoad = MIN(1.0, s_gpuBusy / span);
+        s_gpuBusy = 0.0;
+        s_gpuWindowStart = gpuEnd;
+    }
+    os_unfair_lock_unlock(&s_fpsLock);
+}
+
+__attribute__((visibility("default"))) double AKMetalLastGPUTimeMs(void) {
+    os_unfair_lock_lock(&s_fpsLock);
+    double ms = s_lastGPUTimeMs;
+    os_unfair_lock_unlock(&s_fpsLock);
+    return ms;
+}
+__attribute__((visibility("default"))) double AKMetalGPULoad(void) {
+    os_unfair_lock_lock(&s_fpsLock);
+    double load = s_gpuLoad;
+    os_unfair_lock_unlock(&s_fpsLock);
+    return load;
+}
+
+// How long the client waited for a drawable.
+//
+// This separates the two ways a frame can be late when the GPU is not the
+// limit. A drawable request that blocks means the display or the present queue
+// is holding the frame back; a request that returns at once means the client
+// still had work to do and had not asked the GPU yet. Same 20 ms frame, two
+// different owners.
+static double s_lastDrawableWaitMs = 0.0;
+
+void AKRecordMetalDrawableWait(double seconds) {
+    if (!isfinite(seconds) || !(seconds >= 0.0)) return;
+    os_unfair_lock_lock(&s_fpsLock);
+    s_lastDrawableWaitMs = seconds * 1000.0;
+    os_unfair_lock_unlock(&s_fpsLock);
+}
+
+__attribute__((visibility("default"))) double AKMetalLastDrawableWaitMs(void) {
+    os_unfair_lock_lock(&s_fpsLock);
+    double ms = s_lastDrawableWaitMs;
+    os_unfair_lock_unlock(&s_fpsLock);
+    return ms;
+}
+
+// Hooks install on the first HUD request, including requests made after device
+// creation. When hidden, there are no per-frame statistics handlers or timers.
+static atomic_bool s_recordFrames = false;
+static atomic_uint s_statisticsGeneration;
+static id<MTLDevice> s_statisticsDevice;
+void AKInstallMetalPresentationDiagnostics(id<MTLDevice> device);
+__attribute__((visibility("default"))) void AKEnableMetalFrameStatistics(void) {
+    if (atomic_exchange(&s_recordFrames, true)) return;
+    os_unfair_lock_lock(&s_fpsLock);
+    s_fpsCount = s_fpsHead = 0;
+    s_cachedFPS = s_lastFrameDurationMs = s_lastPresentedAt = 0;
+    s_lastGPUTimeMs = s_gpuBusy = s_gpuWindowStart = s_gpuLoad = s_lastDrawableWaitMs = 0;
+    os_unfair_lock_unlock(&s_fpsLock);
+    id<MTLDevice> device;
+    @synchronized(CAMetalLayer.class) { device = s_statisticsDevice; }
+    if (device) AKInstallMetalPresentationDiagnostics(device);
+}
+__attribute__((visibility("default"))) void AKDisableMetalFrameStatistics(void) { atomic_store(&s_recordFrames, false); atomic_fetch_add(&s_statisticsGeneration, 1); }
 
 // Development-only presentation evidence. All normal execution stays native.
 // The sample flag also saves one GPU readback after rendering, before present.
@@ -14,9 +158,12 @@ static void (*originalPresent)(id,SEL,id<MTLDrawable>);
 static void (*originalPresentAt)(id,SEL,id<MTLDrawable>,CFTimeInterval);
 static void (*originalPresentAfter)(id,SEL,id<MTLDrawable>,CFTimeInterval);
 static void (*originalCommit)(id,SEL);
-static atomic_uint_fast64_t obtained, presented;
+static atomic_uint_fast64_t obtained;
+#if !TARGET_OS_SIMULATOR
+static atomic_uint_fast64_t presented;
+#endif
 static char captureMarker, captureTarget;
-static char timingMarker;
+static char timingMarker, frameMarker;
 static BOOL captureFrames, measureFrames;
 @interface AKFrameTiming : NSObject
 @property double start, previous, longest;
@@ -44,10 +191,15 @@ extern NSArray *AKRenderStatsForCommand(id command);
 static id<CAMetalDrawable> observedNextDrawable(id layer, SEL selector) {
     // A framebuffer-only drawable cannot be copied for diagnostic readback.
     if(captureFrames) ((CAMetalLayer *)layer).framebufferOnly=NO;
+    BOOL recording = atomic_load(&s_recordFrames);
+    unsigned generation = atomic_load(&s_statisticsGeneration);
+    double requestedAt = recording ? CACurrentMediaTime() : 0;
     id<CAMetalDrawable> drawable=originalNextDrawable(layer,selector);
+    if (recording) AKRecordMetalDrawableWait(CACurrentMediaTime()-requestedAt);
+    if (!recording && !captureFrames && !measureFrames) return drawable;
     if(drawable) {
         uint64_t count=atomic_fetch_add(&obtained,1)+1;
-        if(count==1 || count==60 || count==600 || count==1800) AKLog(@"Metal drawable %llu acquired: %lux%lu format=%lu",(unsigned long long)count,(unsigned long)drawable.texture.width,(unsigned long)drawable.texture.height,(unsigned long)drawable.texture.pixelFormat);
+        if((captureFrames || measureFrames) && (count==1 || count==60 || count==600 || count==1800)) AKLog(@"Metal drawable %llu acquired: %lux%lu format=%lu",(unsigned long long)count,(unsigned long)drawable.texture.width,(unsigned long)drawable.texture.height,(unsigned long)drawable.texture.pixelFormat);
         if(captureFrames && (count==60 || count==600 || count==1800)) { objc_setAssociatedObject(drawable,&captureMarker,@(count),OBJC_ASSOCIATION_RETAIN_NONATOMIC); CGRect r=((CALayer *)layer).frame; AKLog(@"drawable layer=%p super=%p frame=(%g,%g,%g,%g) hidden=%d",layer,((CALayer *)layer).superlayer,r.origin.x,r.origin.y,r.size.width,r.size.height,((CALayer *)layer).hidden); }
         AKFrameTiming *timing=nil;
         if(measureFrames) {
@@ -59,23 +211,32 @@ static id<CAMetalDrawable> observedNextDrawable(id layer, SEL selector) {
 #if !TARGET_OS_SIMULATOR
         // Presentation timestamps are diagnostics; the simulator SDK lacks them.
         [drawable addPresentedHandler:^(id<MTLDrawable> frame) {
+            if (atomic_load(&s_recordFrames) && generation == atomic_load(&s_statisticsGeneration)) AKRecordMetalFramePresented(frame.presentedTime);
             [timing presentedAt:frame.presentedTime];
             uint64_t count=atomic_fetch_add(&presented,1)+1;
-            if(count==1 || count==60 || count==600 || count==1800) AKLog(@"Metal frame %llu presented at %.6f",(unsigned long long)count,frame.presentedTime);
+            if((captureFrames || measureFrames) && (count==1 || count==60 || count==600 || count==1800)) AKLog(@"Metal frame %llu presented at %.6f",(unsigned long long)count,frame.presentedTime);
         }];
 #else
-        (void)timing;
+        (void)timing; (void)generation;
 #endif
     }
     return drawable;
 }
 static void markCapture(id command,id<MTLDrawable> drawable) {
+    if (atomic_load(&s_recordFrames)) objc_setAssociatedObject(command,&frameMarker,@YES,OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     if(objc_getAssociatedObject(drawable,&captureMarker)) objc_setAssociatedObject(command,&captureTarget,drawable,OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 }
 static void observedPresent(id command,SEL selector,id<MTLDrawable> drawable) { markCapture(command,drawable); originalPresent(command,selector,drawable); }
 static void observedPresentAt(id command,SEL selector,id<MTLDrawable> drawable,CFTimeInterval time) { markCapture(command,drawable); originalPresentAt(command,selector,drawable,time); }
 static void observedPresentAfter(id command,SEL selector,id<MTLDrawable> drawable,CFTimeInterval time) { markCapture(command,drawable); originalPresentAfter(command,selector,drawable,time); }
 static void observedCommit(id<MTLCommandBuffer> command,SEL selector) {
+    if (atomic_load(&s_recordFrames) && objc_getAssociatedObject(command,&frameMarker)) {
+        objc_setAssociatedObject(command,&frameMarker,nil,OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        unsigned generation = atomic_load(&s_statisticsGeneration);
+        [command addCompletedHandler:^(id<MTLCommandBuffer> completed) {
+            if (atomic_load(&s_recordFrames) && generation == atomic_load(&s_statisticsGeneration)) AKRecordMetalFrameGPU(completed.GPUStartTime,completed.GPUEndTime);
+        }];
+    }
     id<CAMetalDrawable> drawable=objc_getAssociatedObject(command,&captureTarget);
     if(drawable) {
         NSNumber *captureNumber=objc_getAssociatedObject(drawable,&captureMarker);
@@ -107,27 +268,28 @@ static void observedCommit(id<MTLCommandBuffer> command,SEL selector) {
     }
     originalCommit(command,selector);
 }
-static IMP replace(Class cls,SEL selector,IMP implementation) {
-    Method method=class_getInstanceMethod(cls,selector); if(!method) return NULL;
-    IMP original=method_getImplementation(method);
-    class_replaceMethod(cls,selector,implementation,method_getTypeEncoding(method)); return original;
+static void replace(Class cls,SEL selector,IMP implementation,IMP *original) {
+    Method method=class_getInstanceMethod(cls,selector); if(!method) return;
+    // Publish the native target before making the wrapper callable: a HUD can
+    // be enabled while a rendering thread is already requesting drawables.
+    *original=method_getImplementation(method);
+    class_replaceMethod(cls,selector,implementation,method_getTypeEncoding(method));
 }
 void AKInstallMetalPresentationDiagnostics(id<MTLDevice> device) {
+    @synchronized(CAMetalLayer.class) { s_statisticsDevice = device; }
     BOOL sample=[NSProcessInfo.processInfo.arguments containsObject:@"--sample-native"];
     BOOL measure=[NSProcessInfo.processInfo.arguments containsObject:@"--measure-native"];
-    if(!sample && !measure) return;
+    if(!sample && !measure && !atomic_load(&s_recordFrames)) return;
     static dispatch_once_t once;
     dispatch_once(&once,^{
         captureFrames=sample; measureFrames=measure;
-        originalNextDrawable=(void *)replace(CAMetalLayer.class,@selector(nextDrawable),(IMP)observedNextDrawable);
-        // Timing observes presentation timestamps only. It never enables GPU
-        // readback or changes framebuffer flags, even on authentication screens.
-        if(!sample)return;
+        replace(CAMetalLayer.class,@selector(nextDrawable),(IMP)observedNextDrawable,(IMP *)&originalNextDrawable);
+        // HUD observation never enables readback or changes framebuffer flags.
         id<MTLCommandQueue> queue=[device newCommandQueue]; id<MTLCommandBuffer> command=[queue commandBuffer]; Class cls=object_getClass(command);
-        AKInstallRenderDiagnostics(cls);
-        originalPresent=(void *)replace(cls,@selector(presentDrawable:),(IMP)observedPresent);
-        originalPresentAt=(void *)replace(cls,@selector(presentDrawable:atTime:),(IMP)observedPresentAt);
-        originalPresentAfter=(void *)replace(cls,@selector(presentDrawable:afterMinimumDuration:),(IMP)observedPresentAfter);
-        originalCommit=(void *)replace(cls,@selector(commit),(IMP)observedCommit);
+        if (sample) AKInstallRenderDiagnostics(cls);
+        replace(cls,@selector(presentDrawable:),(IMP)observedPresent,(IMP *)&originalPresent);
+        replace(cls,@selector(presentDrawable:atTime:),(IMP)observedPresentAt,(IMP *)&originalPresentAt);
+        replace(cls,@selector(presentDrawable:afterMinimumDuration:),(IMP)observedPresentAfter,(IMP *)&originalPresentAfter);
+        replace(cls,@selector(commit),(IMP)observedCommit,(IMP *)&originalCommit);
     });
 }

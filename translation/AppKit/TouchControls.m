@@ -45,6 +45,7 @@ NSNotificationName const AKTouchCloseAppNotification = @"AKTouchCloseAppNotifica
 // The keys the launcher's and the platform's switches read. The trackpad string
 // is the one the platform already stored, so an existing choice carries over.
 NSString *const AKTouchControlsDefaultsKey = @"AKTouchControls";
+static NSString *const AKDictationLocaleKey = @"AKToolbarDictationLocale";
 static NSString *const AKTouchTrackpadDefaultsKey = @"TKTouchTrackpadEnabled";
 // The composer's placeholder when nothing has been dictated or typed: it says what the field
 // does, so an empty box is not mistaken for the game's own text.
@@ -319,7 +320,9 @@ static NSString *AKComposerDefaultLabel(void) { return AKHostLocalized(@"touch.d
     AKTouchGamepad *_gamepad;
     BOOL _tookOwnPlace;
     UIView *_dictationGroup;
-    UIButton *_dictateButton, *_dictationSendButton, *_dictationCancelButton;
+    UIButton *_dictateButton, *_dictationSendButton, *_dictationCancelButton, *_dictationLanguageButton;
+    NSLayoutConstraint *_dictationLanguageWidth, *_draftTextTop, *_composerHeight;
+    NSString *_dictationLocale;
     UILabel *_dictationStatus, *_draftLabel;
     UIControl *_dictationShield;
     NSString *_dictationState;
@@ -608,12 +611,53 @@ static void AKEmitTouch(void *context, AKTrackpadAction action, double x, double
         [_toolbarDragOrigins removeObjectForKey:key];
     }
 }
+- (NSString *)preferredDictationLocale {
+    id saved = [NSUserDefaults.standardUserDefaults objectForKey:AKDictationLocaleKey];
+    NSString *identifier = [saved isKindOfClass:NSString.class] && [saved length] ? saved : _keyboardInput.textInputMode.primaryLanguage;
+    if (!identifier.length || [identifier isEqual:@"emoji"]) identifier = NSLocale.preferredLanguages.firstObject ?: @"en-US";
+    return [identifier stringByReplacingOccurrencesOfString:@"_" withString:@"-"];
+}
+- (void)updateDictationLanguage {
+    NSString *selected = _dictationLocale ?: [self preferredDictationLocale];
+    NSMutableOrderedSet<NSString *> *locales = [NSMutableOrderedSet orderedSetWithArray:@[@"en-US",@"es-ES"]];
+    [locales addObject:selected];
+    for (UITextInputMode *mode in UITextInputMode.activeInputModes)
+        if (mode.primaryLanguage.length && ![mode.primaryLanguage isEqual:@"emoji"])
+            [locales addObject:[mode.primaryLanguage stringByReplacingOccurrencesOfString:@"_" withString:@"-"]];
+    NSMutableArray<UIAction *> *actions = [NSMutableArray new];
+    __weak AKTouchControls *weakSelf = self;
+    for (NSString *identifier in locales) {
+        NSLocale *locale = [NSLocale localeWithLocaleIdentifier:identifier];
+        NSString *name = [locale localizedStringForLocaleIdentifier:identifier] ?: identifier;
+        UIAction *action = [UIAction actionWithTitle:name image:nil identifier:identifier handler:^(UIAction *choice) {
+            (void)choice; [weakSelf selectDictationLocale:identifier];
+        }];
+        action.state = [identifier isEqual:selected] ? UIMenuElementStateOn : UIMenuElementStateOff;
+        [actions addObject:action];
+    }
+    _dictationLanguageButton.menu = [UIMenu menuWithTitle:AKHostLocalized(@"touch.dictation.language.note") children:actions];
+    NSLocale *locale = [NSLocale localeWithLocaleIdentifier:selected];
+    NSString *name = [locale localizedStringForLanguageCode:locale.languageCode] ?: selected;
+    [_dictationLanguageButton setTitle:[name stringByAppendingString:@" ▾"] forState:UIControlStateNormal];
+    _dictationLanguageButton.accessibilityValue = name;
+}
+- (void)selectDictationLocale:(NSString *)identifier {
+    if (!self.voiceDraftActive || [identifier isEqual:_dictationLocale]) return;
+    _dictationLocale = identifier;
+    [NSUserDefaults.standardUserDefaults setObject:identifier forKey:AKDictationLocaleKey];
+    [self updateDictationLanguage];
+    [self postDictationAction:@"language"];
+}
 - (void)postDictationAction:(NSString *)action {
-    [NSNotificationCenter.defaultCenter postNotificationName:@"AKTouchDictationAction" object:self userInfo:@{@"action":action, @"locale":_keyboardInput.textInputMode.primaryLanguage ?: @"", @"text":_keyboardInput.text ?: @""}];
+    [NSNotificationCenter.defaultCenter postNotificationName:@"AKTouchDictationAction" object:self userInfo:@{@"action":action, @"locale":_dictationLocale ?: [self preferredDictationLocale], @"text":_keyboardInput.text ?: @""}];
 }
 - (void)startDictation {
     if (_gamepad.configuring) return;
+    // Capture the choice before dismissing UIKit's keyboard; hidden editors
+    // do not reliably report the language the user expects to speak.
+    _dictationLocale = [self preferredDictationLocale];
     [self cancelTouches]; [self dismissKeyboard];
+    [self updateDictationLanguage];
     [self postDictationAction:@"start"];
 }
 - (BOOL)voiceDraftActive { return _dictationState && ![_dictationState isEqualToString:@"idle"]; }
@@ -631,6 +675,10 @@ static void AKEmitTouch(void *context, AKTrackpadAction action, double x, double
     BOOL wasActive = self.voiceDraftActive;
     _dictationState = note.userInfo[@"state"] ?: @"idle";
     BOOL active = self.voiceDraftActive;
+    _dictationLanguageButton.hidden = !active;
+    _dictationLanguageWidth.constant = active ? 140 : 0;
+    _draftTextTop.constant = active ? 26 : 4;
+    _composerHeight.constant = active ? 104 : 82;
     if (active && !wasActive) [_keyboardInput beginVoiceDraft];
     NSString *text = note.userInfo[@"text"];
     if (active && [text isKindOfClass:NSString.class]) {
@@ -929,6 +977,14 @@ static void AKEmitTouch(void *context, AKTrackpadAction action, double x, double
     label.textColor = UIColor.lightGrayColor;
     label.adjustsFontSizeToFitWidth = YES;
     label.minimumScaleFactor = 0.75;
+    _dictationLanguageButton = [UIButton buttonWithType:UIButtonTypeSystem];
+    _dictationLanguageButton.hidden = YES;
+    _dictationLanguageButton.showsMenuAsPrimaryAction = YES;
+    _dictationLanguageButton.titleLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightSemibold];
+    _dictationLanguageButton.titleLabel.lineBreakMode = NSLineBreakByTruncatingTail;
+    _dictationLanguageButton.accessibilityIdentifier = @"wolkara.dictation.language";
+    _dictationLanguageButton.accessibilityLabel = AKHostLocalized(@"touch.dictation.language");
+    _dictationLanguageButton.accessibilityHint = AKHostLocalized(@"touch.dictation.language.note");
     UIButton *insert = _insertDraftButton = [UIButton buttonWithType:UIButtonTypeSystem];
     [insert setTitle:AKHostLocalized(@"touch.draft.replace") forState:UIControlStateNormal];
     insert.titleLabel.font = [UIFont boldSystemFontOfSize:17];
@@ -940,17 +996,21 @@ static void AKEmitTouch(void *context, AKTrackpadAction action, double x, double
     clear.accessibilityLabel = AKHostLocalized(@"touch.draft.clear");
     clear.accessibilityIdentifier = @"wolkaraforever.keyboard.clear";
     [clear addTarget:self action:@selector(clearDraft) forControlEvents:UIControlEventTouchUpInside];
-    for (UIView *view in @[label, _keyboardInput, insert, clear]) {
+    for (UIView *view in @[label, _dictationLanguageButton, _keyboardInput, insert, clear]) {
         view.translatesAutoresizingMaskIntoConstraints = NO;
         [_composer addSubview:view];
     }
     [NSLayoutConstraint activateConstraints:@[
         [label.leadingAnchor constraintEqualToAnchor:_composer.leadingAnchor constant:12],
         [label.topAnchor constraintEqualToAnchor:_composer.topAnchor constant:6],
-        [label.trailingAnchor constraintEqualToAnchor:_composer.trailingAnchor constant:-12],
+        [label.trailingAnchor constraintEqualToAnchor:_dictationLanguageButton.leadingAnchor constant:-4],
         [label.heightAnchor constraintEqualToConstant:16],
+        [_dictationLanguageButton.trailingAnchor constraintEqualToAnchor:_composer.trailingAnchor constant:-8],
+        [_dictationLanguageButton.topAnchor constraintEqualToAnchor:_composer.topAnchor],
+        [_dictationLanguageButton.heightAnchor constraintEqualToConstant:44],
+        (_dictationLanguageWidth = [_dictationLanguageButton.widthAnchor constraintEqualToConstant:0]),
         [_keyboardInput.leadingAnchor constraintEqualToAnchor:_composer.leadingAnchor constant:8],
-        [_keyboardInput.topAnchor constraintEqualToAnchor:label.bottomAnchor constant:4],
+        (_draftTextTop = [_keyboardInput.topAnchor constraintEqualToAnchor:label.bottomAnchor constant:4]),
         [_keyboardInput.bottomAnchor constraintEqualToAnchor:_composer.bottomAnchor constant:-8],
         [_keyboardInput.trailingAnchor constraintEqualToAnchor:clear.leadingAnchor],
         [clear.widthAnchor constraintEqualToConstant:44],
@@ -977,7 +1037,7 @@ static void AKEmitTouch(void *context, AKTrackpadAction action, double x, double
         [_composer.bottomAnchor constraintEqualToAnchor:host.keyboardLayoutGuide.topAnchor constant:-4],
         [_composer.centerXAnchor constraintEqualToAnchor:host.safeAreaLayoutGuide.centerXAnchor],
         width, [_composer.widthAnchor constraintLessThanOrEqualToConstant:800],
-        [_composer.heightAnchor constraintEqualToConstant:82],
+        (_composerHeight = [_composer.heightAnchor constraintEqualToConstant:82]),
     ]];
 
     // Placement happens in layoutSubviews, by frame, from the host's own bounds - see

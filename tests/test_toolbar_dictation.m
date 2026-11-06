@@ -98,8 +98,18 @@ static void Check(BOOL condition, NSString *what) {
 }
 @end
 
+@interface LocaleDictation : AKDictation
+@property (nonatomic, copy) NSString *requestedLocale;
+@end
+@implementation LocaleDictation
+- (BOOL)beginWithLocale:(NSString *)locale progress:(void (^)(NSString *))progress completion:(AKDictationCompletion)completion {
+    self.requestedLocale = locale;
+    return [super beginWithLocale:locale progress:progress completion:completion];
+}
+@end
+
 static void TestToolbarDictation(UIWindow *window) {
-    AKDictation *dictation = AKDictation.shared;
+    LocaleDictation *dictation = [LocaleDictation new];
     [dictation cancel];
     FakeSpeech *speech = [FakeSpeech new]; FakeAudio *audio = [FakeAudio new];
     dictation.speech = speech; dictation.audio = audio; dictation.transcriptHandler = nil;
@@ -123,6 +133,14 @@ static void TestToolbarDictation(UIWindow *window) {
     CHECK(([preview isEqualToString:@"hello whirl"] && target.inserts == 0 && target.returns == 1), @"partial results appear only in the visible draft");
     [speech say:@"hello world" final:NO];
     CHECK(([preview isEqualToString:@"hello world"] && target.inserts == 0), @"a recognition correction replaces the draft without game keys");
+    void (^oldLanguage)(NSString *, BOOL, NSError *) = speech.handler;
+    NSUInteger oldStarts = speech.starts;
+    [NSNotificationCenter.defaultCenter postNotificationName:@"AKTouchDictationAction" object:target
+        userInfo:@{@"action":@"language", @"locale":@"en-US"}];
+    CHECK(([dictation.requestedLocale isEqual:@"en-US"] && speech.starts == oldStarts + 1 && !preview.length), @"language selection starts a fresh recognizer and clears the old draft");
+    oldLanguage(@"stale Spanish result", YES, nil);
+    CHECK((!preview.length && target.returns == 1 && !target.escapes && !target.inserts && audio.recording), @"switching language ignores old results without opening chat twice or typing");
+    [speech say:@"hello world" final:NO];
     void (^late)(NSString *, BOOL, NSError *) = speech.handler;
     action(@"confirm"); action(@"confirm"); late(@"extra words never reviewed", YES, nil);
     CHECK((target.inserts == 1 && target.returns == 2 && target.escapes == 1 && [target.lastText isEqualToString:@"hello world"]), @"confirm sends exactly the displayed text, one Return and one closing Esc, once");

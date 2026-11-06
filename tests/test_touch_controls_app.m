@@ -1,3 +1,4 @@
+#import "../translation/AppKit/AKPerformanceOverlay.h"
 // Original UIKit/AppKit fixture for manual touch/keyboard testing. No guest.
 #import "AppKit.h"
 #import "TouchControls.h"
@@ -6,6 +7,17 @@
 #import "SavedTextController.h"
 #include <assert.h>
 #include <dlfcn.h>
+
+@interface AKTouchControls (DictationLanguageFixture)
+- (void)selectDictationLocale:(NSString *)identifier;
+@end
+
+@interface AKPerformanceOverlay (PerformanceFixture)
+- (void)handlePan:(UIPanGestureRecognizer *)pan;
+@end
+@interface UIView (HostTrackingFixture)
+- (BOOL)nativeControlsActive;
+@end
 
 @interface AKInputFixtureView : NSView
 @property CATextLayer *heading, *instructions, *result;
@@ -322,6 +334,87 @@ static void AKSavedTextSettle(UIViewController *presenter) {
     NSLog(@"TOUCH_UI_SELF_TEST_PASS: secure saved-text editor, save without typing, single hold submission, persistent-store reload, empty value, background clearing and refusal paths");
     exit(EXIT_SUCCESS);
 }
+- (void)saveFixturePreview {
+    [NSTimer scheduledTimerWithTimeInterval:0.3 repeats:NO block:^(NSTimer *timer) {
+        (void)timer;
+        UIWindow *window = [(UIView *)[self.guest valueForKey:@"_host"] window];
+        [window layoutIfNeeded];
+        UIView *host = [self.guest valueForKey:@"_host"];
+        UIView *target;
+        if ([NSProcessInfo.processInfo.arguments containsObject:@"--performance-test"])
+            target = [host valueForKey:@"_performanceOverlay"];
+        else {
+            AKTouchControls *controls = [host valueForKey:@"_touchControls"];
+            target = [(UIView *)[controls valueForKey:@"_keyboardInput"] superview];
+        }
+        [target layoutIfNeeded]; assert(target.bounds.size.width > 0 && target.bounds.size.height > 0);
+        UIGraphicsImageRenderer *renderer = [[UIGraphicsImageRenderer alloc] initWithBounds:target.bounds];
+        NSData *png = [renderer PNGDataWithActions:^(UIGraphicsImageRendererContext *context) {
+            [target.layer renderInContext:context.CGContext];
+        }];
+        NSString *path = [NSHomeDirectory() stringByAppendingPathComponent:@"Documents/fixture-preview.png"];
+        assert([png writeToFile:path atomically:YES]);
+        NSLog(@"TOUCH_UI_SELF_TEST_PASS: saved UIKit preview"); exit(EXIT_SUCCESS);
+    }];
+}
+- (void)checkLateMetalMetrics {
+    UIView *host = [self.guest valueForKey:@"_host"];
+    AKPerformanceOverlay *overlay = [host valueForKey:@"_performanceOverlay"];
+    [NSUserDefaults.standardUserDefaults setObject:@{@"performanceOverlayEnabled":@NO}
+        forKey:@"WolkaraForeverTouchLayoutV1"];
+    overlay.hidden = NO;
+    [overlay updateMetrics];
+    assert(dlsym(RTLD_DEFAULT, "AKMetalCurrentFPS") == NULL);
+    NSString *library = [NSBundle.mainBundle.bundlePath stringByAppendingPathComponent:@"LateMetalMetrics.dylib"];
+    assert(dlopen(library.fileSystemRepresentation, RTLD_NOW | RTLD_GLOBAL));
+    void (*prepare)(void) = dlsym(RTLD_DEFAULT, "AKTestPrepareLateMetal");
+    void (*record)(void) = dlsym(RTLD_DEFAULT, "AKTestRecordMetalFrames");
+    assert(prepare && record);
+    prepare();
+    [overlay updateMetrics]; // Resolves the late library and enables its real hooks.
+    void (*intervals)(void) = dlsym(RTLD_DEFAULT, "AKTestMetricIntervals");
+    assert(intervals); intervals();
+    // Start fresh after interval tests.
+    overlay.hidden = YES; overlay.hidden = NO;
+    record();
+    [overlay updateMetrics];
+    UILabel *label = [overlay valueForKey:@"_fpsLabel"];
+    assert([label.text containsString:@"60"]);
+    overlay.hidden = YES;
+    assert([overlay valueForKey:@"_pollTimer"] == nil);
+    overlay.hidden = NO;
+    record(); [overlay updateMetrics];
+    assert([label.text containsString:@"60"]);
+    overlay.expanded = YES; [overlay layoutIfNeeded];
+    for (NSString *key in @[@"_expandedFPSLabel",@"_expandedGPULabel",@"_expandedThermalLabel",@"_expandedMemoryLabel",@"_expandedBatteryLabel",@"_expandedPowerLabel"]) {
+        UILabel *row = [overlay valueForKey:key];
+        assert(row.text.length && row.bounds.size.height > 10 && row.bounds.size.width > 100);
+    }
+    overlay.expanded = NO;
+    AKToolbarTestPan *drag = [AKToolbarTestPan new];
+    drag.testState = UIGestureRecognizerStateBegan; [overlay handlePan:drag];
+    assert(overlay.interacting && [host nativeControlsActive]);
+    drag.testState = UIGestureRecognizerStateChanged; drag.movement = CGPointMake(5000,5000); [overlay handlePan:drag];
+    assert(CGRectContainsRect(UIEdgeInsetsInsetRect(host.bounds,host.safeAreaInsets),overlay.frame));
+    drag.testState = UIGestureRecognizerStateEnded; [overlay handlePan:drag];
+    assert(!overlay.interacting);
+    AKTouchControls *controls = [host valueForKey:@"_touchControls"];
+    AKTouchGamepad *gamepad = [controls valueForKey:@"_gamepad"];
+    [gamepad toggleSettings];
+    UISwitch *toggle = (id)FindToolbarView(host, @"wolkara.controls.performance");
+    assert(toggle);
+    toggle.on = YES; [toggle sendActionsForControlEvents:UIControlEventValueChanged];
+    assert(gamepad.layout.performanceOverlayEnabled && !overlay.hidden);
+    toggle.on = NO; [toggle sendActionsForControlEvents:UIControlEventValueChanged];
+    assert(overlay.hidden && [overlay valueForKey:@"_pollTimer"] == nil);
+    [gamepad toggleSettings];
+    if ([NSProcessInfo.processInfo.arguments containsObject:@"--save-preview"]) {
+        overlay.hidden = NO; overlay.expanded = YES; record(); [overlay updateMetrics];
+        [self saveFixturePreview]; return;
+    }
+    NSLog(@"TOUCH_UI_SELF_TEST_PASS: late Metal load, late HUD enable, synthetic 60 FPS and hide/show recovery");
+    exit(EXIT_SUCCESS);
+}
 - (void)checkReviewedVoiceDraft {
     UIView *host = [self.guest valueForKey:@"_host"];
     AKTouchControls *controls = [host valueForKey:@"_touchControls"];
@@ -331,7 +424,8 @@ static void AKSavedTextSettle(UIViewController *presenter) {
     UIButton *send = (id)FindToolbarView(controls, @"wolkaraforever.dictationSend");
     UIButton *cancel = (id)FindToolbarView(controls, @"wolkaraforever.dictationCancel");
     UIButton *draftCancel = [controls valueForKey:@"_clearDraftButton"];
-    __block NSString *lastAction = nil, *submitted = nil;
+    __block NSString *lastAction = nil, *submitted = nil, *locale = nil;
+    [NSUserDefaults.standardUserDefaults setObject:@"es-ES" forKey:@"AKToolbarDictationLocale"];
     void (^publish)(NSString *, NSString *) = ^(NSString *state, NSString *text) {
         NSMutableDictionary *info = [@{@"state":state} mutableCopy];
         if (text) info[@"text"] = text;
@@ -339,7 +433,8 @@ static void AKSavedTextSettle(UIViewController *presenter) {
     };
     id observer = [NSNotificationCenter.defaultCenter addObserverForName:@"AKTouchDictationAction" object:controls queue:nil usingBlock:^(NSNotification *note) {
         lastAction = note.userInfo[@"action"];
-        if ([lastAction isEqualToString:@"start"]) publish(@"authorizing", @"");
+        locale = note.userInfo[@"locale"];
+        if ([lastAction isEqualToString:@"start"] || [lastAction isEqualToString:@"language"]) publish(@"authorizing", @"");
         else if ([lastAction isEqualToString:@"pause"]) publish(@"review", nil);
         else if ([lastAction isEqualToString:@"confirm"]) { submitted = note.userInfo[@"text"]; publish(@"idle", @""); }
         else if ([lastAction isEqualToString:@"cancel"] || [lastAction isEqualToString:@"dismiss"]) publish(@"idle", @"");
@@ -350,8 +445,19 @@ static void AKSavedTextSettle(UIViewController *presenter) {
     assert([draft.text isEqualToString:@"hello world"] && send.enabled && !controls.keyboardVisible);
     if ([NSProcessInfo.processInfo.arguments containsObject:@"--review-draft-preview"]) {
         publish(@"listening", @"Hola equipo, nos vemos junto a la entrada. Este texto se queda aquí hasta pulsar enviar.");
+        if ([NSProcessInfo.processInfo.arguments containsObject:@"--save-preview"]) [self saveFixturePreview];
         return;
     }
+    UIButton *language = [controls valueForKey:@"_dictationLanguageButton"];
+    assert(!language.hidden && language.showsMenuAsPrimaryAction && [locale isEqual:@"es-ES"]);
+    [controls selectDictationLocale:@"en-US"];
+    assert([lastAction isEqual:@"language"] && [locale isEqual:@"en-US"] && !draft.text.length);
+    assert([[NSUserDefaults.standardUserDefaults stringForKey:@"AKToolbarDictationLocale"] isEqual:@"en-US"]);
+    BOOL checkedEnglish = NO;
+    for (UIAction *choice in language.menu.children)
+        if ([choice.identifier isEqual:@"en-US"]) checkedEnglish = choice.state == UIMenuElementStateOn;
+    assert(checkedEnglish);
+    publish(@"listening", @"hello world");
     AKDrainFixtureEvents(); assert(!guest.text.length && guest.lastKeyEvent == nil);
     [draft becomeFirstResponder]; AKDrainFixtureEvents();
     assert([lastAction isEqualToString:@"pause"] && controls.keyboardVisible && draft.inputView == nil);
@@ -360,7 +466,9 @@ static void AKSavedTextSettle(UIViewController *presenter) {
     [send sendActionsForControlEvents:UIControlEventTouchUpInside]; AKDrainFixtureEvents();
     assert([submitted isEqualToString:@"hello world edited"] && !draft.text.length && draft.superview.hidden && !controls.keyboardVisible);
     assert(!guest.text.length && guest.lastKeyEvent == nil); // Only the notification may request a commit.
-    [mic sendActionsForControlEvents:UIControlEventTouchUpInside]; publish(@"listening", @"discard this");
+    [mic sendActionsForControlEvents:UIControlEventTouchUpInside];
+    assert([locale isEqual:@"en-US"] && !language.hidden);
+    publish(@"listening", @"discard this");
     [cancel sendActionsForControlEvents:UIControlEventTouchUpInside];
     assert([lastAction isEqualToString:@"cancel"] && !draft.text.length && draft.superview.hidden);
     [draft insertDictationResult:@[]]; [draft insertText:@"late native result"];
@@ -576,6 +684,10 @@ static void AKSavedTextSettle(UIViewController *presenter) {
                 fprintf(stderr, "TOUCH_UI_SELF_TEST_TIMEOUT\n");
                 _Exit(EXIT_FAILURE);
             });
+    }
+    if ([NSProcessInfo.processInfo.arguments containsObject:@"--performance-test"]) {
+        [NSTimer scheduledTimerWithTimeInterval:0.2 repeats:NO block:^(NSTimer *timer) { (void)timer; [self checkLateMetalMetrics]; }];
+        return;
     }
     if ([NSProcessInfo.processInfo.arguments containsObject:@"--review-draft-test"] || [NSProcessInfo.processInfo.arguments containsObject:@"--review-draft-preview"]) {
         [NSTimer scheduledTimerWithTimeInterval:1 repeats:NO block:^(NSTimer *timer) {

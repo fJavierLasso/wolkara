@@ -5,6 +5,10 @@
 #import "TouchActionOverlay.h"
 #include <assert.h>
 #include <math.h>
+extern CGError CGWarpMouseCursorPosition(CGPoint point);
+@interface UIView (CameraPointerFixture)
+- (void)moveHoverTo:(CGPoint)point inside:(BOOL)inside;
+@end
 
 @interface CameraTouch : UITouch
 @property CGPoint point;
@@ -36,7 +40,7 @@ static void Empty(void) {
     assert(![NSApp nextEventMatchingMask:UINT64_MAX untilDate:NSDate.distantPast inMode:NSDefaultRunLoopMode dequeue:YES]);
 }
 static void Warp(CGPoint point) {
-    [NSNotificationCenter.defaultCenter postNotificationName:@"AKMouseAnchorChanged" object:nil userInfo:@{@"x":@(point.x),@"y":@(point.y)}];
+    assert(CGWarpMouseCursorPosition(point)==kCGErrorSuccess);
 }
 static void CheckDelta(NSEvent *e,CGFloat dx,CGFloat dy) {
     if (fabs(e.deltaX-dx)>.001 || fabs(e.deltaY-dy)>.001) {
@@ -89,6 +93,9 @@ static void CheckCamera(CGSize size, CGPoint start, BOOL right) {
     CGPoint screen=NSEvent.mouseLocation;
     // Touch-down and small jitter never change either polled position or events.
     Send(host,event,finger,UITouchPhaseBegan,start); Empty();
+    // A delayed UIKit pointer-region refresh must not re-anchor a new finger.
+    [host moveHoverTo:CGPointMake(size.width-2,2) inside:YES]; Empty();
+    CheckPolled(window,anchor,size);
     Send(host,event,finger,UITouchPhaseMoved,CGPointMake(start.x+3,start.y+2)); Empty();
     assert(CGPointEqualToPoint(window.mouseLocationOutsideOfEventStream,CGPointMake(anchor.x,size.height-anchor.y)));
     assert(CGPointEqualToPoint(NSEvent.mouseLocation,screen));
@@ -102,6 +109,7 @@ static void CheckCamera(CGSize size, CGPoint start, BOOL right) {
     Send(host,event,finger,UITouchPhaseMoved,moved); Empty();
     moved=CGPointMake(moved.x+4,moved.y-3);
     Send(host,event,finger,UITouchPhaseMoved,moved); CheckEvent(drag,edge,size,4,-3);
+    [host moveHoverTo:CGPointMake(2,2) inside:YES]; Empty(); CheckPolled(window,edge,size);
     CameraTouch *other=[CameraTouch new]; other.host=host;
     event.touches=[NSSet setWithObjects:finger,other,nil];
     Send(host,event,other,UITouchPhaseBegan,CGPointMake(20,20)); Empty();

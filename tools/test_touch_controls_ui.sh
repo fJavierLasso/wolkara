@@ -21,6 +21,14 @@ xcrun --sdk iphonesimulator clang -target arm64-apple-ios17.0-simulator -isysroo
     launcher/App/SavedTextStore.m launcher/App/SavedTextController.m launcher/App/WKLocalization.m -framework Security \
     translation/AppKit/*.m translation/AppKit/*.c tests/test_touch_controls_app.m \
     $(cat translation/AppKit/ldflags) -o "$APP/TouchControlsFixture"
+if [[ " $* " == *" --performance-test "* ]]; then
+    xcrun --sdk iphonesimulator clang -target arm64-apple-ios17.0-simulator -isysroot "$SDK" -fobjc-arc -O1 -g \
+        -Wall -Wextra -Werror -Wno-unused-parameter -Wno-deprecated-declarations -dynamiclib \
+        -Itranslation/AKSupport translation/Metal/Presentation.m tests/late_metal_metrics.m \
+        -framework Foundation -framework Metal -framework QuartzCore -framework UIKit -framework ImageIO -framework CoreGraphics \
+        -o "$APP/LateMetalMetrics.dylib"
+    codesign --force --sign - "$APP/LateMetalMetrics.dylib" > /dev/null
+fi
 cat > "$APP/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">

@@ -2,10 +2,13 @@
 #include <stdint.h>
 #import "AKSupport.h"
 #import <Metal/Metal.h>
+#include <math.h>
 bool CGCursorIsVisible(void) { return !AKCursorIsHidden(); }
 CGError CGAssociateMouseAndMouseCursorPosition(boolean_t connected) { AKMouseSetCaptured(!connected); return kCGErrorSuccess; }
 CGError CGWarpMouseCursorPosition(CGPoint point) {
-    if(!AKMouseIsCaptured())return kCGErrorNotImplemented;
+    // Clients also restore their cursor after releasing capture. Dropping that
+    // warp leaves the next camera drag starting from a stale absolute anchor.
+    if(!isfinite(point.x) || !isfinite(point.y))return kCGErrorIllegalArgument;
     [NSNotificationCenter.defaultCenter postNotificationName:@"AKMouseAnchorChanged" object:nil userInfo:@{@"x":@(point.x),@"y":@(point.y)}];
     return kCGErrorSuccess;
 }

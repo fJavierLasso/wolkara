@@ -559,6 +559,8 @@
 "touch.dictation.sendButton" = "Send";
 "touch.dictation.send.hint" = "Sends the reviewed draft, presses Return once, then Esc to close chat.";
 "touch.dictation.draft.label" = "Dictation draft";
+"touch.dictation.language" = "Dictation language";
+"touch.dictation.language.note" = "Choose the language you speak. Changing it starts a new draft.";
 
 // Saved text toolbar key
 "touch.savedText.title" = "Key";
@@ -574,3 +576,6 @@
 "touch.gamepad.value.full" = "Full";
 "touch.gamepad.value.simple" = "Simple";
 "touch.gamepad.toggleEnabled" = "Turn touch controller on or off";
+
+"touch.gamepad.leftStick.hint" = "Double-tap for L3.";
+"touch.gamepad.rightStick.hint" = "Double-tap for R3.";

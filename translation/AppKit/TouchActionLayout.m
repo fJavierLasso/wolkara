@@ -90,9 +90,14 @@ static NSString *DefaultGroup(NSString *identifier) {
     y=MAX(CGRectGetMinY(bounds)+4-CGRectGetMinY(content)*unit,MIN(CGRectGetMaxY(bounds)-4-CGRectGetMaxY(content)*unit,y));
     return CGPointMake(x,y);
 }
-- (CGRect)frameForAction:(AKTouchAction *)action inBounds:(CGRect)bounds {
+- (CGPoint)pointForPosition:(CGPoint)position inBounds:(CGRect)bounds {
     CGFloat unit=[self unitScaleInBounds:bounds]; CGPoint origin=[self originInBounds:bounds unit:unit];
-    return CGRectMake(origin.x+(action.position.x-action.diameter/2)*unit,origin.y+(action.position.y-action.diameter/2)*unit,action.diameter*unit,action.diameter*unit);
+    return CGPointMake(origin.x+position.x*unit,origin.y+position.y*unit);
+}
+- (CGRect)frameForAction:(AKTouchAction *)action inBounds:(CGRect)bounds {
+    CGFloat diameter=action.diameter*[self unitScaleInBounds:bounds];
+    CGPoint center=[self pointForPosition:action.position inBounds:bounds];
+    return CGRectMake(center.x-diameter/2,center.y-diameter/2,diameter,diameter);
 }
 - (void)moveGroupBy:(CGPoint)delta inBounds:(CGRect)bounds {
     if (bounds.size.width<=0 || bounds.size.height<=0) return;

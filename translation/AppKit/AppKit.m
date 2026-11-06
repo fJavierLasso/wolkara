@@ -4,6 +4,8 @@
 #import "TextInput.h"
 #import "TouchControls.h"
 #import "TouchGamepad.h"
+#import "TouchGamepadLayout.h"
+#import "AKPerformanceOverlay.h"
 #import <GameController/GameController.h>
 #import <objc/message.h>
 #import <objc/runtime.h>
@@ -248,6 +250,7 @@ NSEventModifierFlags AKModifiersReconciled(NSEventModifierFlags held, NSEventMod
 
 @implementation AKHostView { CGPoint _last; NSEventModifierFlags _mods; BOOL _pressedRight, _pressedLeft, _pointerInside, _softwareCursor; UIImageView *_cursorView; UIPointerInteraction *_pointer; UIPointerStyle *_gamePointerStyle; unsigned _hoverUpdates, _pointerUpdates, _cursorVisibilityReasons; NSTimeInterval _pointerReportTime;
     AKTouchControls *_touchControls;
+    AKPerformanceOverlay *_performanceOverlay;
     BOOL _touchCursorActive, _touchCursorInitialized, _pressedMiddle;
     NSTimeInterval _lastTouchClickTime;
     CGPoint _lastTouchClickPoint;
@@ -287,10 +290,21 @@ NSEventModifierFlags AKModifiersReconciled(NSEventModifierFlags held, NSEventMod
             [_touchControls.centerXAnchor constraintEqualToAnchor:self.safeAreaLayoutGuide.centerXAnchor],
         ]];
         [self touchTrackpadChanged:_touchControls.trackpadEnabled];
+        _performanceOverlay = [[AKPerformanceOverlay alloc] initWithFrame:CGRectZero];
+        _performanceOverlay.layer.zPosition = 90000;
+        [self performanceOverlayLayoutChanged:nil];
+        [self addSubview:_performanceOverlay];
+        [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(performanceOverlayLayoutChanged:)
+            name:AKGamepadLayoutDidChangeNotification object:nil];
     }
     return self;
 }
-- (BOOL)nativeControlsActive { return _touchControls.configuring; }
+- (void)performanceOverlayLayoutChanged:(NSNotification *)note {
+    (void)note;
+    AKGamepadLayout *layout = [[AKGamepadLayout alloc] initWithDefaults:NSUserDefaults.standardUserDefaults];
+    _performanceOverlay.hidden = !layout.performanceOverlayEnabled;
+}
+- (BOOL)nativeControlsActive { return _touchControls.configuring || _performanceOverlay.interacting; }
 - (BOOL)canBecomeFirstResponder { return YES; }
 - (void)setNsWindow:(NSWindow *)window {
     _nsWindow = window;
@@ -299,6 +313,7 @@ NSEventModifierFlags AKModifiersReconciled(NSEventModifierFlags held, NSEventMod
 - (void)layoutSubviews {
     [super layoutSubviews];
     [self.nsWindow ak_hostBoundsChanged:self.bounds];
+    [_performanceOverlay setNeedsLayout];
     if (!_touchCursorInitialized && _touchControls.trackpadEnabled) [self touchTrackpadChanged:YES];
     if (!CGSizeEqualToSize(_touchViewportSize, self.bounds.size)) {
         [_touchControls cancelTouches];
@@ -528,7 +543,9 @@ NSEventModifierFlags AKModifiersReconciled(NSEventModifierFlags held, NSEventMod
     return defaultRegion;
 }
 - (void)moveHoverTo:(CGPoint)point inside:(BOOL)inside {
-    if([self usesRelativeMouse])return;
+    // A finger owns the pointer until it lifts. UIKit can deliver a stale
+    // hover/region refresh between touch-down and the first camera delta.
+    if(_directTouch || [self usesRelativeMouse])return;
     BOOL wasTouchCursor = _touchCursorActive;
     _touchCursorActive = NO;
     BOOL changed=wasTouchCursor || _pointerInside!=inside || !CGPointEqualToPoint(_last,point);

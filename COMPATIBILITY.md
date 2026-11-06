@@ -391,3 +391,80 @@ after launch. Physical gameplay confirmation of these three changes is pending.
   sleep/scene fixtures and signed Release bundle validation pass. Installed in
   place on the Duo after confirming Wolkara was closed; normal launcher process
   confirmed and existing game data preserved. In-game folding remains unverified.
+
+## Simple-mode shoulder defaults (2026-11-06)
+
+- Default LB/RB centers in Simple now match the green/red target icons in the
+  user's 1280x900 reference: (507,568) and (772,568), above the neutral abilities.
+  They use the ability block's viewport transform, including its position and
+  scale, while retaining the configurable shoulder-button size and safe-area
+  clamping. Saved Simple positions still override the defaults; Full positions
+  and shoulder swapping remain independent.
+- Existing ability-layout and virtual-controller UI regressions pass, including
+  input delivery, Full/Simple switching, editing, persistence and slot swapping.
+  Signed Release build and bundle validation pass. Installed in place on the
+  Duo after the user closed Wolkara; normal launch confirmed, game data kept.
+  Physical confirmation of the new default alignment remains pending.
+
+## Dictation language, camera restart and performance overlay (2026-11-06)
+
+- The previous punctuation/task-hint trial did **not** fix the English title-case
+  draft on the Duo, according to the user's screenshot. A synthetic English
+  recording through on-device `es-ES` recognition reproduced title-cased words
+  and recognition mistakes; the same audio through `en-US` returned normal
+  sentence case. This supports the locale diagnosis without claiming to have
+  inspected the recognizer's locale on the user's device.
+- The draft now displays its speech language. English, Spanish and configured
+  keyboard languages are selectable; the selection persists. A language change
+  clears the draft and restarts only recognition, invalidating late results.
+  It adds no Return/Esc or guest text. Transcript casing is not rewritten, and
+  sending still requires explicit review. Native Speech punctuation is retained.
+- Direct camera regression now invokes the real `CGWarpMouseCursorPosition`
+  wrapper: uncaptured restore warps previously failed. A second regression
+  reproduced an absolute hover update overwriting the anchor while a finger
+  owned the gesture. Both failed before and pass after their respective fixes.
+  The four-viewport fixture also covers repeated drags, capture/release,
+  cancellation, resizing, trackpad mode and ability-circle handoff. The user
+  subsequently confirmed that the combined update works correctly on the Duo.
+- Ported the optional performance HUD from WolkaraForever (including late Metal
+  lookup/enable from `227b69e`), with attribution retained. The in-game controls settings own
+  its persisted toggle. Frame rate comes from Metal presentation timestamps;
+  GPU timing covers the presenting command buffer only. No display-link FPS
+  substitute, 120 Hz override, render preset or frame readback is enabled.
+  Hidden/background HUDs stop polling and per-frame statistics. Invalid,
+  duplicate and stale samples are rejected; re-enabling resets old history.
+- Validation: 43 toolbar-controller checks, language/draft UIKit checks, direct
+  camera regressions, HUD toggle/late-load/hide-show and synthetic 60/30 FPS
+  interval tests, the emulation/sanitizer suite, signed Release build and app
+  bundle checks passed. Synthetic metrics do not establish game FPS on the Duo.
+  The installed build also retains previously verified local audio/toolbar work;
+  that unrelated work is excluded from this PR's new changes.
+- Installed in place over Wi-Fi after the user closed Wolkara; normal launcher
+  process confirmed. Game data was preserved. The user subsequently reported
+  that the combined update works perfectly; no numeric device FPS was supplied.
+
+## Double-tap stick clicks (2026-11-06)
+
+- Double-tapping the left/right stick sends one L3/R3 press and release. The
+  lower-right safe-area quadrant also accepts R3 on bare game content while the
+  virtual controller is visible, including Simple mode. Toolbar, ability circles,
+  other UIKit controls, indirect pointers and settings/editing are excluded.
+  Dragging at the existing eight-point threshold defeats tap recognition;
+  joystick lifts remain immediate. UIKit delays background tap endings to
+  distinguish a single click from R3, cancelling the taps when R3 is recognized.
+- Apple's native hidden virtual controller did not expose either stick button in
+  the simulator, even when requested. A scoped compatibility extension provides
+  the missing buttons using public writable controller snapshots. Only registered
+  touch controllers are extended; their identity, axes and existing buttons remain
+  intact. Discovery, dictionaries, per-button/profile callbacks and captures expose
+  the added buttons. Physical/unregistered controllers and snapshots are excluded.
+- Native-controller fixture checks pass for initial discovery, polling, callbacks,
+  captures, pulse release and settings/mode cancellation. A separate unregistered
+  native-controller fixture confirms isolation. Full controls/32 ability-chord,
+  lifecycle and direct-camera regressions also pass. These synthetic tests do not
+  prove physical double-tap recognition or in-game L3/R3 behavior; device validation
+  remains pending.
+- Signed Release build and bundle validation pass, including the new controller
+  bridge in the packaged AppKit adapter. Installed in place over Wi-Fi after the
+  exact-bundle guard confirmed Wolkara was closed; normal launch confirmed and
+  game data preserved.

@@ -13,6 +13,6 @@ mkdir -p build/direct-touch-camera
 xcrun --sdk iphonesimulator clang -target arm64-apple-ios17.0-simulator -isysroot "$SDK" -fobjc-arc -O1 -g \
     -Wall -Wextra -Werror -Wno-unused-parameter -Wno-deprecated-declarations \
     -Itranslation/AKSupport -Itranslation/AppKit translation/AKSupport/AKSupport.m \
-    translation/AppKit/*.m translation/AppKit/*.c tests/test_direct_touch_camera.m \
-    $(cat translation/AppKit/ldflags) -o build/direct-touch-camera/test
+    translation/AppKit/*.m translation/AppKit/*.c translation/CoreGraphics/Displays.m tests/test_direct_touch_camera.m \
+    $(cat translation/AppKit/ldflags) -framework Metal -o build/direct-touch-camera/test
 xcrun simctl spawn "$SIM_ID" "$PWD/build/direct-touch-camera/test"
