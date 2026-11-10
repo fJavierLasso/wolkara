@@ -3,6 +3,7 @@
 #include <assert.h>
 extern void AKFixtureAutoreleaseTemporary(void);
 extern unsigned AKFixtureLiveTemporaries(void);
+void AKInstallMetalBackgroundSubmission(id<MTLDevice> device) { (void)device; }
 void AKInstallMetalPresentationDiagnostics(id<MTLDevice> device) { (void)device; }
 void AKInstallManagedStorage(Class device) { (void)device; }
 static BOOL failLoad;

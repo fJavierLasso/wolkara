@@ -105,9 +105,10 @@ WoW gameplay under this capability set remain untested.
 - Settings → Game tools also provides the addon manager, WTF + Interface backups,
   gamepad settings and graphics reset. Tools follow the selected edition.
 - Release builds and optimized adapters, shader cache hits without a full byte copy,
-  optional expensive diagnostics and a 5 FPS background rendering limit. Foreground
-  rendering keeps the standard iOS frame-rate behavior; no 120 Hz override or M1
-  graphics preset is applied.
+  optional expensive diagnostics and a pause of GPU submissions while inactive.
+  Pending rendering and texture uploads resume when the app becomes active;
+  foreground rendering keeps the standard iOS frame-rate behavior; no 120 Hz
+  override or M1 graphics preset is applied.
 
 ## Moving an existing installation
 

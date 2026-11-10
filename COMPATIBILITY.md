@@ -641,3 +641,35 @@ controller adds another Escape. The regression fixture now models an editor
 that stays open after publishing, including the slash residue, instead of
 assuming Return closed it. It checks one message, cleared text, a closed editor,
 no menu activation and a matching key-up after every closing key.
+
+## Background graphics resume (2026-11-10)
+
+The Duo user reported missing terrain, model materials and map content after
+returning from another app. Some resources return after waiting or moving, while
+others need another entry. Existing logs show the old 5 FPS background rendering
+path, but no recorded Metal command failure; they do not establish the cause.
+
+The Metal adapter now pauses drawable acquisition and command-buffer submission
+on deactivation, including upload-only queues. A pending native buffer stays
+with its caller and is submitted once on activation, with its original resources
+and completion semantics. The main-thread wait delivers lifecycle events. The
+transition gives previously committed commands a bounded opportunity to become
+scheduled; it does not wait for GPU completion or hold UIKit indefinitely behind
+an explicitly enqueued but uncommitted queue entry. Tracking is weak and transient
+collections have a local autorelease pool. The first eight command failures log
+only their error domain/code, without texture contents or application labels.
+
+This replaces a 5 FPS limit that still submitted GPU work in the background,
+where iOS can reject it. See Apple's [Metal background guidance](https://developer.apple.com/documentation/metal/preparing-your-metal-app-to-run-in-the-background).
+It is not a background-network keepalive guarantee: the render loop can now wait
+until activation, and iOS/server suspension and connection rules still apply.
+
+Validation: simulator fixtures pass main/worker resume, all three queue and
+command-buffer factories, forwarding wrappers, bounded scheduling drain, native
+completion/error propagation and weak resource lifetimes. Twelve native private
+texture upload/readback cycles pass across both performance-HUD hook installation
+orders. Shader-library lifetime and memory-journal regressions pass. The clean,
+signed generic iOS Release and shipped-bundle checks pass. Simulator lifecycle
+notifications and textures do not establish recovery in a real backgrounded game;
+the update was installed under the same bundle after the closed-app guard and
+the launcher started. The user's Duo gameplay check remains pending.

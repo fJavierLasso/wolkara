@@ -3,6 +3,7 @@
 #import "AKSupport.h"
 #import "LibraryContainer.h"
 #import "RealFunction.h"
+#import "BackgroundExecution.h"
 #import <objc/runtime.h>
 #import <CommonCrypto/CommonDigest.h>
 #import <UIKit/UIKit.h>
@@ -196,6 +197,7 @@ static id<MTLLibrary> loadLibraryInPool(id receiver,SEL selector,dispatch_data_t
 extern void AKInstallMetalPresentationDiagnostics(id<MTLDevice> device);
 extern void AKInstallManagedStorage(Class device);   // opt-in; see ManagedStorage.m
 static void addDesktopProperties(id<MTLDevice> device) {
+    AKInstallMetalBackgroundSubmission(device);
     AKInstallMetalPresentationDiagnostics(device);
     Class cls=object_getClass(device);
     static dispatch_once_t once;
