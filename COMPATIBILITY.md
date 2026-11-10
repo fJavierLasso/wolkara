@@ -697,7 +697,9 @@ HUD updates through stale profile objects. The native virtual-controller fixture
 passes repeated profile switches, restored geometry/appearance/settings/abilities
 and held-button cancellation without reconnection. Existing ability input/layout,
 controller lifecycle, toolbar resize/edit isolation, global HUD hide/show,
-localization and signed generic iOS Release/bundle checks pass. Device installation and the user's profile-switching check remain pending.
+localization and signed generic iOS Release/bundle checks pass. The update was
+installed on the Duo under the same bundle after the closed-app guard, preserving
+its data, and the launcher started. The user's profile-switching check remains pending.
 
 Ongoing Wolkara work is published directly to `develop`. It retains the prior
 PR's complete history, including chat, retirement of the mobile experiment and
