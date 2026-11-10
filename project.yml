@@ -82,9 +82,6 @@ targetTemplates:
         buildPhase: resources
       - path: ZIPFoundation-LICENSE
         buildPhase: resources
-      - path: addons/WolkaraMobile
-        type: folder
-        buildPhase: resources
       - path: runtime
       # The shader-container rewrap, for the Diagnostics menu's captured-shader check.
       - path: translation/Metal/LibraryContainer.m

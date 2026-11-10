@@ -1,4 +1,3 @@
-#import "AKMobileInterface.h"
 #import "TouchGamepad.h"
 #import "TouchGamepadLayout.h"
 #import "AKHostLocalization.h"
@@ -152,7 +151,6 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
 @property(nonatomic, readonly) BOOL configuring;
 @property(nonatomic, readonly) BOOL editing;
 @property(nonatomic, copy) void (^configurationChanged)(void);
-@property(nonatomic, copy) void (^mobileCommand)(AKMobileCommand);
 - (void)reset;
 - (void)toggleSettings;
 - (void)finishConfiguration;
@@ -162,7 +160,7 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
     NSDictionary<NSString *,UIView *> *_items;
     NSMutableDictionary<NSString *,NSValue *> *_dragOrigins;
     UIView *_settings;
-    UIButton *_editDone, *_mobileDone;
+    UIButton *_editDone;
     UILabel *_hint;
     UISwitch *_editSwitch, *_hapticsSwitch, *_swapShouldersSwitch, *_performanceSwitch;
     UIStackView *_settingsColumns;
@@ -233,13 +231,6 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
         _editDone.accessibilityIdentifier = @"wolkaraforever.layout.done";
         [_editDone addTarget:self action:@selector(finishConfiguration) forControlEvents:UIControlEventTouchUpInside];
         [self addSubview:_editDone];
-        _mobileDone = [UIButton buttonWithType:UIButtonTypeSystem];
-        [_mobileDone setTitle:@"Done & save" forState:UIControlStateNormal];
-        _mobileDone.backgroundColor = [UIColor colorWithWhite:0.12 alpha:0.96];
-        _mobileDone.tintColor = UIColor.systemYellowColor; _mobileDone.layer.cornerRadius = 14;
-        _mobileDone.accessibilityIdentifier = @"wolkara.mobile.done"; _mobileDone.hidden = YES;
-        [_mobileDone addTarget:self action:@selector(finishMobileEditing) forControlEvents:UIControlEventTouchUpInside];
-        [self addSubview:_mobileDone];
         _hint = [UILabel new]; _hint.text = AKHostLocalized(@"touch.gamepad.dragHint");
         _hint.font = [UIFont systemFontOfSize:13 weight:UIFontWeightMedium];
         _hint.textColor = UIColor.whiteColor; _hint.textAlignment = NSTextAlignmentCenter;
@@ -251,15 +242,14 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
 - (BOOL)configuring { return _settings != nil || _editing || _actions.editing; }
 - (BOOL)configurationContainsPoint:(CGPoint)point inView:(UIView *)view {
     if ([_actions editorContainsPoint:point inView:view]) return YES;
-    if (!_mobileDone.hidden && CGRectContainsPoint(_mobileDone.bounds, [_mobileDone convertPoint:point fromView:view])) return YES;
     UIView *control = _editing ? _editDone : _settings;
     return control && !control.hidden && CGRectContainsPoint(control.bounds, [control convertPoint:point fromView:view]);
 }
 - (void)setControlsVisible:(BOOL)visible { _controlsVisible = visible; [self updateAppearance]; }
 - (void)setSimple:(BOOL)simple { _simple = simple; [self updateAppearance]; }
 - (void)updateAppearance {
-    self.hidden = !_controlsVisible && !self.configuring && _mobileDone.hidden;
-    _actions.active = _controlsVisible && !self.configuring && _mobileDone.hidden;
+    self.hidden = !_controlsVisible && !self.configuring;
+    _actions.active = _controlsVisible && !self.configuring;
     for (NSString *name in _items) {
         UIView *item = _items[name];
         BOOL omitted = _simple && [@[@"right",@"LT",@"RT"] containsObject:name];
@@ -340,8 +330,6 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
     [self place:@"menu" frame:CGRectMake(CGRectGetMidX(self.bounds)-22,bottom-side+190*side/216-22,44,44)
         baseSize:CGSizeMake(44,44) safe:safe];
     _editDone.frame = CGRectMake(CGRectGetMidX(safe)-70,CGRectGetMinY(safe)+60,140,40);
-    _mobileDone.frame = CGRectMake(CGRectGetMidX(safe)-70,CGRectGetMinY(safe)+60,140,40);
-    [self bringSubviewToFront:_mobileDone];
     _hint.frame = CGRectMake(CGRectGetMidX(safe)-150,CGRectGetMinY(safe)+103,300,22);
     if (_settings) {
         // Keep the fixed toolbar clear. Wide screens use two columns; smaller
@@ -454,21 +442,6 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
     UIStackView *performanceRow = [[UIStackView alloc] initWithArrangedSubviews:@[[self label:AKHostLocalized(@"touch.settings.overlay.detail")],_performanceSwitch]];
     performanceRow.axis = UILayoutConstraintAxisHorizontal; performanceRow.alignment = UIStackViewAlignmentCenter;
     [options addArrangedSubview:performanceRow];
-    if ([NSUserDefaults.standardUserDefaults boolForKey:AKMobileAvailableKey]) {
-        UISwitch *mobile = [UISwitch new]; mobile.on = AKMobileInterfaceEnabled();
-        mobile.accessibilityIdentifier = @"wolkara.controls.mobileInterface";
-        mobile.accessibilityLabel = @"Mobile interface (WoW)";
-        [mobile addTarget:self action:@selector(mobileChanged:) forControlEvents:UIControlEventValueChanged];
-        UIStackView *row = [[UIStackView alloc] initWithArrangedSubviews:@[[self label:@"Mobile interface (WoW)"],mobile]];
-        row.axis = UILayoutConstraintAxisHorizontal; row.alignment = UIStackViewAlignmentCenter;
-        [options addArrangedSubview:row];
-        UIButton *editMobile = [UIButton buttonWithType:UIButtonTypeSystem];
-        [editMobile setTitle:@"Arrange mobile abilities…" forState:UIControlStateNormal];
-        editMobile.accessibilityIdentifier = @"wolkara.controls.mobileEdit";
-        [editMobile addTarget:self action:@selector(beginMobileEditing) forControlEvents:UIControlEventTouchUpInside];
-        [options addArrangedSubview:editMobile];
-        [options addArrangedSubview:[self label:@"Original menus and bags. Tap an item to use; hold for options; hold then drag to move. Changes wait until combat ends."]];
-    }
     _editSwitch = [UISwitch new]; _editSwitch.accessibilityLabel = AKHostLocalized(@"touch.settings.edit");
     _editSwitch.accessibilityIdentifier = @"wolkaraforever.controls.edit";
     [_editSwitch addTarget:self action:@selector(beginEditing:) forControlEvents:UIControlEventValueChanged];
@@ -522,21 +495,6 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
     if (self.configurationChanged) self.configurationChanged();
 }
 
-- (void)mobileChanged:(UISwitch *)sender {
-    [NSUserDefaults.standardUserDefaults setBool:sender.on forKey:AKMobileEnabledKey];
-    if (!sender.on) _mobileDone.hidden = YES;
-    if (self.mobileCommand) self.mobileCommand(sender.on ? AKMobileEnable : AKMobileDisable);
-}
-- (void)beginMobileEditing {
-    [NSUserDefaults.standardUserDefaults setBool:YES forKey:AKMobileEnabledKey];
-    [self finishConfiguration];
-    if (self.mobileCommand) { self.mobileCommand(AKMobileEnable); self.mobileCommand(AKMobileEdit); }
-    _mobileDone.hidden = NO; [self updateAppearance];
-}
-- (void)finishMobileEditing {
-    if (self.mobileCommand) self.mobileCommand(AKMobileDone);
-    _mobileDone.hidden = YES; [self updateAppearance];
-}
 - (void)performanceChanged:(UISwitch *)sender {
     _preferences.performanceOverlayEnabled = sender.on; [_preferences save];
 }
@@ -633,11 +591,6 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
         _areaDoubleTap = [self installDoubleTapOn:host selector:@selector(rightStickDoubleTapped:) background:YES];
         _overlay.leftStick.accessibilityHint = AKHostLocalized(@"touch.gamepad.leftStick.hint");
         _overlay.rightStick.accessibilityHint = AKHostLocalized(@"touch.gamepad.rightStick.hint");
-        _overlay.mobileCommand = ^(AKMobileCommand command) {
-            AKTouchGamepad *self = weakSelf; if (!self) return;
-            id<AKMobileInterfaceHost> host = (id)self->_host;
-            if ([host conformsToProtocol:@protocol(AKMobileInterfaceHost)]) [host ak_mobileCommand:command];
-        };
         _overlay.configurationChanged = ^{
             AKTouchGamepad *self = weakSelf;
             if (self && self->_overlay.configuring) { [self cancelStickClicks]; [self->_actionInput releaseAll]; }

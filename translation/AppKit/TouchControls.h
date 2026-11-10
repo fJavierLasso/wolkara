@@ -83,4 +83,7 @@ extern NSString *const AKTouchOwnedKeyUsagesKey;                             // 
 // is what turns words into the guest's key events.
 - (void)touchInsertText:(NSString *)text;
 - (void)touchSpecialKey:(unsigned short)code characters:(NSString *)characters;
+// An explicit channel button submits a reviewed draft; speech never calls this
+// from a recognition callback. Returns NO without typing if the host is gone.
+- (BOOL)touchSendChatText:(NSString *)text channel:(NSString *)channel;
 @end

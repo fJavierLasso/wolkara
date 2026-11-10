@@ -84,11 +84,18 @@ static void Check(BOOL condition, NSString *what) {
 // The game's own text view, as far as dictation is concerned.
 @interface FakeGameTextView : UIView
 @property (nonatomic) NSUInteger inserts, returns, escapes;
-@property (nonatomic, copy) NSString *lastText;
+@property (nonatomic, copy) NSString *lastText, *lastChannel;
+@property BOOL rejectChannel;
+@property NSUInteger channelSends;
 @property (nonatomic, strong) NSMutableArray<NSString *> *actions;
 @end
 
 @implementation FakeGameTextView
+- (BOOL)touchSendChatText:(NSString *)text channel:(NSString *)channel {
+    if (self.rejectChannel) return NO;
+    self.lastText = text; self.lastChannel = channel; self.channelSends++;
+    [self.actions addObject:@"channel"]; return YES;
+}
 - (void)touchInsertText:(NSString *)text { self.inserts++; self.lastText = text; [self.actions addObject:@"text"]; }
 - (void)touchSpecialKey:(unsigned short)code characters:(NSString *)characters {
     if (code == 53 && [characters isEqualToString:@"\x1b"]) { self.escapes++; [self.actions addObject:@"escape"]; return; }
@@ -201,6 +208,18 @@ static void TestToolbarDictation(UIWindow *window) {
     CHECK(([preview isEqualToString:@"new session"] && target.inserts == 2), @"old callbacks cannot overwrite a new draft");
     preview = @"visible\ntext\t only"; action(@"confirm");
     CHECK(([target.lastText isEqualToString:@"visible text  only"] && target.inserts == 3), @"pasted control characters cannot become game commands");
+    action(@"start"); [speech say:@"canción mañana" final:NO]; late = speech.handler;
+    [target.actions removeAllObjects];
+    target.rejectChannel = YES;
+    [NSNotificationCenter.defaultCenter postNotificationName:@"AKTouchDictationAction" object:target
+        userInfo:@{@"action":@"channel", @"channel":@"reply", @"text":preview}];
+    CHECK(([state isEqual:@"review"] && [preview isEqual:@"canción mañana"] && !audio.recording && !target.channelSends), @"failed channel submission preserves the visible draft");
+    target.rejectChannel = NO;
+    for (int i=0;i<2;i++) [NSNotificationCenter.defaultCenter postNotificationName:@"AKTouchDictationAction" object:target
+        userInfo:@{@"action":@"channel", @"channel":@"reply", @"text":preview}];
+    late(@"unreviewed late words",YES,nil);
+    CHECK((target.channelSends == 1 && [target.lastChannel isEqual:@"reply"] && [target.lastText isEqual:@"canción mañana"]), @"channel sends exactly the reviewed draft once, ignoring late speech");
+    CHECK(([target.actions isEqual:@[@"channel"]] && [state isEqual:@"idle"]), @"channel transaction owns its keys; dictation adds no Return or Esc");
     [NSNotificationCenter.defaultCenter removeObserver:observer]; [AKDictation setGameTextTarget:nil];
     CHECK((controller != nil), @"the toolbar owner survives the tests");
     AKVoiceSettings.shared.trailingSpace = NO; AKVoiceSettings.shared.autoSubmit = NO;

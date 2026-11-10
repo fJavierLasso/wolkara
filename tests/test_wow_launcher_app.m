@@ -104,6 +104,9 @@ static void TestAddonBrowserPolicy(void) {
     NSString *retired=[fixture.directory stringByAppendingPathComponent:@"Interface/AddOns/WolkaraTouch"];
     assert([NSFileManager.defaultManager createDirectoryAtPath:retired withIntermediateDirectories:YES attributes:nil error:NULL]);
     assert([@"synthetic addon" writeToFile:[retired stringByAppendingPathComponent:@"Fixture.lua"] atomically:YES encoding:NSUTF8StringEncoding error:NULL]);
+    NSString *mobile=[fixture.directory stringByAppendingPathComponent:@"Interface/AddOns/WolkaraMobile"];
+    assert([NSFileManager.defaultManager createDirectoryAtPath:mobile withIntermediateDirectories:NO attributes:nil error:NULL]);
+    assert([@"WolkaraMobile bundled addon v1\n" writeToFile:[mobile stringByAppendingPathComponent:@".wolkara-owner"] atomically:YES encoding:NSUTF8StringEncoding error:NULL]);
     [NSUserDefaults.standardUserDefaults removeObjectForKey:@"WolkaraTouchHintShown"];
     self.window=[[UIWindow alloc] initWithWindowScene:(UIWindowScene *)scene];
     self.controller=[[TKWoWViewController alloc] initWithLibrary:(id)fixture];
@@ -128,6 +131,7 @@ static void TestAddonBrowserPolicy(void) {
 - (void)checkReady {
     assert(!self.controller.presentedViewController);
     assert(![NSFileManager.defaultManager fileExistsAtPath:[fixture.directory stringByAppendingPathComponent:@"Interface/AddOns/WolkaraTouch"]]);
+    assert(![NSFileManager.defaultManager fileExistsAtPath:[fixture.directory stringByAppendingPathComponent:@"Interface/AddOns/WolkaraMobile"]]);
     assert([self primary].enabled);
     assert([[self status] isEqual:@"Ready to play"] && self.controller.title.length==0);
     assert([[(UILabel *)Find(self.controller.view,@"wow.title") text] isEqual:@"WOLKARA"]);
@@ -224,14 +228,12 @@ static void TestAddonBrowserPolicy(void) {
     [largeTOC appendString:[@"x" stringByPaddingToLength:1024*1024 withString:@"x" startingAtIndex:0]];
     assert([largeTOC writeToFile:[database stringByAppendingPathComponent:@"Database_Forever.toc"] atomically:YES encoding:NSUTF8StringEncoding error:NULL]);
     NSArray<TKWoWAddon *> *listed=TKWoWAddonsAtDirectory(database.stringByDeletingLastPathComponent);
-    assert(listed.count==3 && [listed.firstObject.title isEqual:@"Database fixture"]);
-    assert([NSUserDefaults.standardUserDefaults boolForKey:@"WolkaraMobileAvailable"]);
-    assert([NSFileManager.defaultManager fileExistsAtPath:[fixture.directory stringByAppendingPathComponent:@"Interface/AddOns/WolkaraMobile/Bridge.lua"]]);
+    assert(listed.count==2 && [listed.firstObject.title isEqual:@"Database fixture"]);
     [self.controller manageAddons];
     TKWoWAddonManagerViewController *manager=(id)self.controller.navigationController.topViewController;
     assert([manager isKindOfClass:TKWoWAddonManagerViewController.class]);
     assert([[[manager valueForKey:@"store"] valueForKey:@"product"] isEqual:@"wowf"]);
-    assert([[manager valueForKey:@"store"] records].count==3);
+    assert([[manager valueForKey:@"store"] records].count==2);
     [manager loadViewIfNeeded];
     [self performSelector:@selector(captureAddonManager) withObject:nil afterDelay:0.4];
 }

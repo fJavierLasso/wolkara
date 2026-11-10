@@ -3,7 +3,6 @@
 #import "Installation.h"
 #import "Updater.h"
 #import "AddonCleanup.h"
-#import "MobileInterface.h"
 #import "GameToolsViewController.h"
 #import "AddonManager.h"
 #import "ForeverUI.h"
@@ -291,13 +290,6 @@ static UIStackView *Stack(NSArray<UIView *> *views, CGFloat spacing) {
                         if ([TKForeverUI recoverInterruptedRestoreInWorkingDirectory:directory error:&error]) {
                             TKWoWRetireTouchAddon(directory,&error);
                             if (!error) [TKForeverUI setLocale:locale inWorkingDirectory:directory error:&error];
-                            BOOL mobileAvailable = [product[@"id"] isEqual:@"wowf"] && [directory.lastPathComponent isEqual:@"_forever_"];
-                            [NSUserDefaults.standardUserDefaults setBool:mobileAvailable forKey:@"WolkaraMobileAvailable"];
-                            if (!error && mobileAvailable) {
-                                NSString *source = [NSBundle.mainBundle.resourcePath stringByAppendingPathComponent:@"WolkaraMobile"];
-                                TKWoWPrepareMobileInterface(directory,source,
-                                    [NSUserDefaults.standardUserDefaults boolForKey:@"WolkaraMobileEnabled"],&error);
-                            }
                         }
                     } @finally { TKWoWReleaseUpdateLock(lock); }
                 }

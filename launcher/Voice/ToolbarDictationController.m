@@ -6,6 +6,7 @@
 @protocol AKToolbarTextTarget <NSObject>
 - (void)touchInsertText:(NSString *)text;
 - (void)touchSpecialKey:(unsigned short)code characters:(NSString *)characters;
+- (BOOL)touchSendChatText:(NSString *)text channel:(NSString *)channel;
 @end
 
 @implementation AKToolbarDictationController {
@@ -108,7 +109,15 @@
         return;
     }
     if (!_ownsDraft || target != _target) return;
-    if ([action isEqualToString:@"confirm"]) {
+    if ([action isEqualToString:@"channel"]) {
+        id text = note.userInfo[@"text"], channel = note.userInfo[@"channel"];
+        if (![text isKindOfClass:NSString.class] || ![channel isKindOfClass:NSString.class] ||
+            ![self canReach:target] || ![target respondsToSelector:@selector(touchSendChatText:channel:)]) return;
+        BOOL capturing = _capturing; _capturing = NO; ++_generation;
+        if (capturing) [_dictation cancel];
+        if ([(id<AKToolbarTextTarget>)target touchSendChatText:text channel:channel]) [self endDraftClosingChat:NO];
+        else [self publishForTarget:target state:@"review" text:nil problem:@"The message could not be sent. Your draft is still here."];
+    } else if ([action isEqualToString:@"confirm"]) {
         // Commit exactly the document the user has seen/edited. Stop speech
         // first and invalidate its callbacks so a late correction cannot sneak
         // extra words into the message or replace a newer draft.

@@ -603,72 +603,29 @@ and the package manifest from the Duo: byte-for-byte verification passed, and
 the existing package records were unchanged. Opened the launcher. Questie
 initialization in the game remains a user check.
 
-## Optional mobile interface (2026-11-10)
+## Retired mobile experiment and explicit chat destinations (2026-11-10)
 
-WolkaraMobile adapts pookee/WolkaraRoue's MIT action selection/feedback and original
-window fitting at 1843b131216352b883a14c5b7ca76b022dc9b69c. The shipped companion
-addon is off by default and limited to Forever. It adds up to 64 individually
-positioned/sized actions, a whole-layout editor and a menu using original game
-dialog/button templates. It does not change unit frames, chat, global UI scale,
-the controller layout or frame-rate policy. Disabling restores original window
-scale, clamp insets and anchors; saved character layouts remain. Explicit Done
-& save reloads the UI. Protected edits and toggle requests defer through combat.
-
-Direct finger taps are tagged through temporary CTRL-ALT-SHIFT-F5–F12 addon
-bindings. Secure container-button wrappers reinterpret only tagged taps as right
-clicks. Hold/release opens item options; hold at least 0.45 s then drag permits
-absolute item movement. Quick swipes retain the existing camera path. Drag/hold
-releases cannot cast a companion ability or use a bag item. A gesture is consumed
-on mouse-up and cleared again by the host; physical mouse and trackpad behavior
-is unchanged. The separate controller-shortcut circles are temporarily inactive
-while editing addon abilities, then resume with their saved settings.
-
-Validation: standalone installer and Lua API-fixture regressions pass, covering
-other-addon/SavedVariables isolation, invalid source and symlink rejection,
-interrupted replacement recovery, on/off restoration, item gesture routing, spell
-assignment, resize/movement, combat queues, explicit saving and layout limits.
-Direct-touch simulator regressions pass for multiple iPhone/iPad viewport sizes,
-including no camera teleport, tagged tap/hold/drag, absolute edit placement,
-cancellation, modifier restoration and untouched physical-pointer events. The
-controller/Settings fixture and launcher fixture pass, including the bundled
-addon in the installed list. A clean signed Release build and bundle checks pass.
-These fixtures do not establish real-client combat/taint compatibility. In-game
-menu interaction, inventory use/equip/drag and spell execution still need the
-user's physical-device test; no guest gameplay was automated.
-
-Device installation: the signed app was installed over the same bundle after the
-closed-app guard, and normal launch succeeded. Bundled addon files matched the PR
-byte for byte. The device connection failed during the follow-up check, before
-companion-folder preparation could be verified. Reaching Ready on the Duo and
-in-game interaction remain pending user checks.
-
-## Mobile addon modifier bridge repair (2026-11-10)
-
-The first physical test reported that touches opened/closed bags instead of
-activating the mobile UI. The old bridge attached Control/Alt/Shift flags to
-function-key events without emitting their press transitions; its final
-flagsChanged event also had no valid modifier key code. A desktop consumer
-tracking modifier edges therefore saw unmodified function keys. The original
-fixture checked only event flags and missed this boundary.
-
-The bridge now emits balanced, correctly keyed left/right modifier transitions
-(including device-dependent bits), preserves held hardware modifiers and Caps
-Lock, and uses only modified F6/F7 instead of the F8-F12 bag keys. Addon bindings
-use WoW's canonical ALT-CTRL-SHIFT order. Enable/disable reports to the game chat;
-`/wolkaramobile` reports version, enabled state, host commands received and module
-errors. The companion addon version is 1.0.1.
-
-A strengthened native input consumer fails on the previous implementation at
-the missing modifier-state assertion and passes after the repair, including
-all eight commands, held right modifiers, Command and Caps Lock restoration.
-`tools/test_mobile_bridge.sh` replays the native event trace through the actual
-Lua bindings and secure snippets: all eight commands resolve correctly. Existing
-camera and addon gesture/layout tests pass. A clean signed Release build and
-bundle checks pass. Actual WoW interaction remains a physical-device check;
-no guest gameplay is automated by these tests.
-
-The repaired app was installed in place after the exact-bundle closed-app guard.
-The launcher also updated the companion folder: all ten shipped source/license
-files read back from the Duo matched the repair byte for byte, and the TOC
-reported version 1.0.1. The exact PR-source export passed the native-to-Lua
-round-trip suite. The user's in-game retest is still pending.
+- Removed the experimental WolkaraMobile resource, installer, native command
+  bridge, gesture changes and Settings controls. The existing virtual controller,
+  touch ability circles, camera, keyboard, dictation and addon manager remain.
+- Before Play, the launcher moves installer-owned WolkaraMobile directories
+  (including interrupted installation stages/backups) outside AddOns, retaining
+  their bytes. Foreign same-named addons, other addons and saved layouts are
+  preserved. The retired host flags are cleared; no companion addon is shipped.
+- Typed and speech drafts offer six explicit, chat-colored send destinations:
+  Say, Group, BG, Reply whisper, General 1 and Trade 2. A channel tap uses the
+  command-chat shortcut, replaces the field and queues one final Return. It
+  works whether chat was open or closed in the synthetic input fixture. The
+  normal Replace/Send path for other fields is unchanged. Numbers and colors
+  use the default WoW channel convention, not live character configuration.
+- Checks passed: sanitizer addon-retirement tests, launcher migration UI,
+  six-destination input tests (Unicode, open/closed chat, duplicate taps, empty
+  and composing drafts), toolbar speech ownership/late-callback tests, native
+  keyboard/autocorrection, camera, virtual controller/ability circles and
+  localization. The UIKit preview confirms readable per-channel colors.
+- The same-bundle update was installed and launched on the Duo. Device readback
+  confirms WolkaraMobile is archived outside AddOns and ControllerForever,
+  Questie and QuestieDB remain active. Actual chat sends await user testing.
+- Signed generic Release and shipped-bundle validation passed; the bundle has
+  no WolkaraMobile resource. Server delivery and channel availability still
+  require the user's real-game check; synthetic tests do not establish those.

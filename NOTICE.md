@@ -116,13 +116,3 @@ ZIPFoundation, used for addon archives and settings backups, is pinned to
 `22787ffb59de99e5dc1fbfe80b19c97a904ad48d`. Copyright (c) 2017–2025 Thomas Zoechling;
 MIT license, preserved in [ZIPFoundation-LICENSE](ZIPFoundation-LICENSE) and shipped
 in the app.
-
-## WolkaraMobile addon
-
-`addons/WolkaraMobile/Actions.lua`, `Picker.lua`, `Windows.lua` and compatibility
-helpers in `Core.lua` adapt the MIT-licensed WolkaraRoue addon from
-[pookee/wolkaraforever at 1843b131216352b883a14c5b7ca76b022dc9b69c](https://github.com/pookee/wolkaraforever/tree/1843b131216352b883a14c5b7ca76b022dc9b69c/addons/WolkaraRoue).
-The original copyright and license are in `addons/WolkaraMobile/LICENSE`, shipped
-inside the bundled addon. No game textures, assets or client code are included;
-texture paths refer to the user's own installation. The optional host controls,
-free-layout editor, menu and touch-only bag gesture bridge are Wolkara adaptations.

@@ -563,3 +563,12 @@
 "addons.web.tooLarge" = "Diese ZIP überschreitet das Downloadlimit von 128 MiB.";
 "addons.web.importZIP" = "ZIP importieren";
 "addons.web.footer" = "Zum Aktualisieren die neue ZIP herunterladen. Verwaltete Pakete werden sicher ersetzt; vorhandene Ordner außerhalb des Managers bleiben unverändert.";
+
+// Explicit destinations for both typed and dictated chat drafts.
+"touch.chat.say" = "Sagen";
+"touch.chat.group" = "An Gruppe";
+"touch.chat.bg" = "An Schlachtfeld";
+"touch.chat.reply" = "Flüstern antworten";
+"touch.chat.general" = "Allgemein · 1";
+"touch.chat.trade" = "Handel · 2";
+"touch.chat.send.hint" = "Sendet diesen Entwurf mit %@ und schließt die Tastatur. Nummerierte Kanäle verwenden die aktuelle Kanalliste im Spiel.";

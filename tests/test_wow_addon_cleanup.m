@@ -28,6 +28,41 @@ int main(void) { @autoreleasepool {
     assert([fm createDirectoryAtPath:source withIntermediateDirectories:NO attributes:nil error:NULL]);
     assert(TKWoWRetireTouchAddon(root,&error));
     assert([fm contentsOfDirectoryAtPath:disabled error:NULL].count == 2);
+    // Retire only installer-owned mobile directories, including interrupted installs.
+    NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
+    [defaults setBool:YES forKey:@"WolkaraMobileEnabled"];
+    [defaults setBool:YES forKey:@"WolkaraMobileAvailable"];
+    [defaults setObject:@"keep layout" forKey:@"WolkaraTouchAbilitiesV1"];
+    NSArray *names = @[@"WolkaraMobile",@".WolkaraMobile-stage",@".WolkaraMobile-backup"];
+    for (NSString *name in names) {
+        NSString *folder = [addons stringByAppendingPathComponent:name];
+        assert([fm createDirectoryAtPath:folder withIntermediateDirectories:NO attributes:nil error:NULL]);
+        assert([@"WolkaraMobile bundled addon v1\n" writeToFile:[folder stringByAppendingPathComponent:@".wolkara-owner"] atomically:YES encoding:NSUTF8StringEncoding error:NULL]);
+        assert([original writeToFile:[folder stringByAppendingPathComponent:@"Fixture.lua"] atomically:YES]);
+    }
+    assert(TKWoWRetireTouchAddon(root,&error));
+    assert(![defaults objectForKey:@"WolkaraMobileEnabled"] && ![defaults objectForKey:@"WolkaraMobileAvailable"]);
+    assert([[defaults stringForKey:@"WolkaraTouchAbilitiesV1"] isEqual:@"keep layout"]);
+    for (NSString *name in names) {
+        assert(![fm fileExistsAtPath:[addons stringByAppendingPathComponent:name]]);
+        NSArray *matches = [[fm contentsOfDirectoryAtPath:disabled error:NULL] filteredArrayUsingPredicate:[NSPredicate predicateWithFormat:@"SELF BEGINSWITH %@",[name stringByAppendingString:@"-"]]];
+        assert(matches.count == 1);
+        NSString *file = [[disabled stringByAppendingPathComponent:matches[0]] stringByAppendingPathComponent:@"Fixture.lua"];
+        assert([[NSData dataWithContentsOfFile:file] isEqual:original]);
+    }
+    assert(TKWoWRetireTouchAddon(root,&error) && [fm contentsOfDirectoryAtPath:disabled error:NULL].count == 5);
+    NSString *foreign = [addons stringByAppendingPathComponent:@"WolkaraMobile"];
+    assert([fm createDirectoryAtPath:foreign withIntermediateDirectories:NO attributes:nil error:NULL]);
+    assert(TKWoWRetireTouchAddon(root,&error) && [fm fileExistsAtPath:foreign]);
+    NSString *marker = [foreign stringByAppendingPathComponent:@".wolkara-owner"];
+    assert([@"Someone else's addon" writeToFile:marker atomically:YES encoding:NSUTF8StringEncoding error:NULL]);
+    assert(TKWoWRetireTouchAddon(root,&error) && [fm fileExistsAtPath:foreign]);
+    assert([fm removeItemAtPath:marker error:NULL]);
+    assert([fm createSymbolicLinkAtPath:marker withDestinationPath:[other stringByAppendingPathComponent:@"Keep.lua"] error:NULL]);
+    assert(!TKWoWRetireTouchAddon(root,&error) && [fm fileExistsAtPath:foreign]);
+    assert([[NSData dataWithContentsOfFile:[other stringByAppendingPathComponent:@"Keep.lua"]] isEqual:original]);
+    assert([fm removeItemAtPath:foreign error:NULL]);
+    [defaults removeObjectForKey:@"WolkaraTouchAbilitiesV1"];
     // No links at the source or its ancestors may reach another installation.
     assert([fm createSymbolicLinkAtPath:source withDestinationPath:other error:NULL]);
     assert(!TKWoWRetireTouchAddon(root,&error) && error);

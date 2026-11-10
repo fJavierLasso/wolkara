@@ -64,6 +64,15 @@
     self.result.string = [NSString stringWithFormat:@"%@\nText: %@", self.lastAction, self.text];
 }
 - (BOOL)acceptsFirstResponder { return YES; }
+- (void)insertText:(id)value replacementRange:(NSRange)range {
+    // Composed Unicode is committed through NSTextInputClient, not keyDown.
+    // Model the same editing surface for both paths in the synthetic fixture.
+    if (range.location == NSNotFound) range = self.selection;
+    NSString *text = [value isKindOfClass:NSAttributedString.class] ? [value string] : value;
+    [self.text replaceCharactersInRange:range withString:text];
+    self.selection = NSMakeRange(range.location + text.length,0);
+    [self refresh];
+}
 - (void)keyDown:(NSEvent *)event {
     if (AKIsPrivateInputEvent(event)) self.privateKeyCount++;
     self.lastKeyEvent = event;
@@ -99,6 +108,32 @@
 - (void)scrollWheel:(NSEvent *)event {
     self.lastAction = [NSString stringWithFormat:@"Scroll %.0f, %.0f", event.deltaX, event.deltaY];
     [self refresh];
+}
+@end
+
+@interface AKChatFixtureView : AKInputFixtureView
+@property BOOL chatOpen;
+@property NSUInteger strayKeys;
+@property NSMutableArray<NSString *> *sent;
+@end
+@implementation AKChatFixtureView
+- (void)keyDown:(NSEvent *)event {
+    if (event.keyCode == 44 && !self.chatOpen) {
+        self.chatOpen = YES; [self.text setString:@""]; self.selection = NSMakeRange(0,0);
+    }
+    if (!self.chatOpen) { self.strayKeys++; return; }
+    if (event.keyCode == 36) {
+        [self.sent addObject:[self.text copy]]; self.chatOpen = NO;
+        [self.text setString:@""]; self.selection = NSMakeRange(0,0); return;
+    }
+    [super keyDown:event];
+}
+- (void)insertText:(id)value replacementRange:(NSRange)range {
+    (void)range;
+    if (!self.chatOpen) { self.strayKeys++; return; }
+    NSString *text = [value isKindOfClass:NSAttributedString.class] ? [value string] : value;
+    [self.text replaceCharactersInRange:self.selection withString:text];
+    self.selection = NSMakeRange(self.selection.location + text.length,0);
 }
 @end
 
@@ -415,6 +450,45 @@ static void AKSavedTextSettle(UIViewController *presenter) {
     NSLog(@"TOUCH_UI_SELF_TEST_PASS: late Metal load, late HUD enable, synthetic 60 FPS and hide/show recovery");
     exit(EXIT_SUCCESS);
 }
+- (void)checkChatChannels {
+    UIView *host = [self.guest valueForKey:@"_host"];
+    AKTouchControls *controls = [host valueForKey:@"_touchControls"];
+    AKChatFixtureView *chat = [[AKChatFixtureView alloc] initWithFrame:self.guest.frame];
+    chat.sent = [NSMutableArray new]; self.guest.contentView = chat; [self.guest makeFirstResponder:chat];
+    UITextView *draft = [controls valueForKey:@"_keyboardInput"];
+    NSArray *channels = @[@"say",@"group",@"bg",@"reply",@"general",@"trade"];
+    NSArray *commands = @[@"/say",@"/p",@"/bg",@"/reply",@"/1",@"/2"];
+    for (NSUInteger i=0; i<channels.count; i++) for (NSNumber *open in @[@NO,@YES]) {
+        chat.chatOpen = open.boolValue;
+        [chat.text setString:@"old unsent message"]; chat.selection = NSMakeRange(3,0);
+        [controls toggleKeyboard]; AKDrainFixtureEvents();
+        UIButton *button = (id)AKFindInputView(host,[@"wolkara.chat." stringByAppendingString:channels[i]]);
+        assert(button && !button.enabled);
+        [draft insertText:@"  canción mañana café 🙂\n/reload\t  "];
+        assert(button.enabled && !draft.superview.hidden);
+        NSUInteger count = chat.sent.count;
+        [button sendActionsForControlEvents:UIControlEventTouchUpInside];
+        [button sendActionsForControlEvents:UIControlEventTouchUpInside];
+        AKDrainFixtureEvents();
+        assert(chat.sent.count == count+1 && !chat.chatOpen && !chat.strayKeys);
+        NSString *expected = [NSString stringWithFormat:@"%@ canción mañana café 🙂 /reload",commands[i]];
+        assert([chat.sent.lastObject isEqual:expected]);
+        assert(!draft.text.length && draft.superview.hidden && !controls.keyboardVisible);
+    }
+    [controls toggleKeyboard]; AKDrainFixtureEvents();
+    UIButton *say = (id)AKFindInputView(host,@"wolkara.chat.say");
+    NSUInteger count = chat.sent.count;
+    [draft insertText:@"   "]; assert(!say.enabled);
+    [say sendActionsForControlEvents:UIControlEventTouchUpInside]; AKDrainFixtureEvents();
+    assert(chat.sent.count == count && !chat.chatOpen);
+    draft.text = @""; [draft setMarkedText:@"uncommitted" selectedRange:NSMakeRange(0,0)];
+    [say sendActionsForControlEvents:UIControlEventTouchUpInside]; AKDrainFixtureEvents();
+    assert(chat.sent.count == count);
+    [controls dismissKeyboard];
+    assert(![controls touchSendChatText:@"hello" channel:@"unknown"] && chat.sent.count == count);
+    NSLog(@"TOUCH_UI_SELF_TEST_PASS: six chat destinations, open/closed chat, Unicode, control sanitizing, one submit, no stray keys, composition and empty draft guards");
+    exit(EXIT_SUCCESS);
+}
 - (void)checkReviewedVoiceDraft {
     UIView *host = [self.guest valueForKey:@"_host"];
     AKTouchControls *controls = [host valueForKey:@"_touchControls"];
@@ -436,7 +510,7 @@ static void AKSavedTextSettle(UIViewController *presenter) {
         locale = note.userInfo[@"locale"];
         if ([lastAction isEqualToString:@"start"] || [lastAction isEqualToString:@"language"]) publish(@"authorizing", @"");
         else if ([lastAction isEqualToString:@"pause"]) publish(@"review", nil);
-        else if ([lastAction isEqualToString:@"confirm"]) { submitted = note.userInfo[@"text"]; publish(@"idle", @""); }
+        else if ([lastAction isEqualToString:@"confirm"] || [lastAction isEqualToString:@"channel"]) { submitted = note.userInfo[@"text"]; publish(@"idle", @""); }
         else if ([lastAction isEqualToString:@"cancel"] || [lastAction isEqualToString:@"dismiss"]) publish(@"idle", @"");
     }];
     [mic sendActionsForControlEvents:UIControlEventTouchUpInside];
@@ -483,6 +557,11 @@ static void AKSavedTextSettle(UIViewController *presenter) {
     [mic sendActionsForControlEvents:UIControlEventTouchUpInside]; publish(@"listening", @"background draft");
     [NSNotificationCenter.defaultCenter postNotificationName:UIApplicationDidEnterBackgroundNotification object:nil];
     assert([lastAction isEqualToString:@"dismiss"] && !draft.text.length && draft.superview.hidden);
+    [mic sendActionsForControlEvents:UIControlEventTouchUpInside]; publish(@"listening",@"dictated channel message");
+    UIButton *reply = (id)AKFindInputView(host,@"wolkara.chat.reply");
+    assert(reply.enabled && !draft.superview.hidden);
+    [reply sendActionsForControlEvents:UIControlEventTouchUpInside];
+    assert([lastAction isEqual:@"channel"] && [submitted isEqual:@"dictated channel message"] && !draft.text.length);
     [NSNotificationCenter.defaultCenter removeObserver:observer];
     NSLog(@"TOUCH_UI_SELF_TEST_PASS: visible live draft, no game input, keyboard editing, exact reviewed confirmation, cancel and background discard");
     exit(EXIT_SUCCESS);
@@ -684,6 +763,10 @@ static void AKSavedTextSettle(UIViewController *presenter) {
                 fprintf(stderr, "TOUCH_UI_SELF_TEST_TIMEOUT\n");
                 _Exit(EXIT_FAILURE);
             });
+    }
+    if ([NSProcessInfo.processInfo.arguments containsObject:@"--chat-channels-test"]) {
+        [NSTimer scheduledTimerWithTimeInterval:1 repeats:NO block:^(NSTimer *timer) { (void)timer; [self checkChatChannels]; }];
+        return;
     }
     if ([NSProcessInfo.processInfo.arguments containsObject:@"--performance-test"]) {
         [NSTimer scheduledTimerWithTimeInterval:0.2 repeats:NO block:^(NSTimer *timer) { (void)timer; [self checkLateMetalMetrics]; }];

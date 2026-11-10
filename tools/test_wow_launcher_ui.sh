@@ -34,7 +34,6 @@ cat > "$APP/Info.plist" <<'PLIST'
 </dict></plist>
 PLIST
 for lang in en de; do cp -R "launcher/App/$lang.lproj" "$APP/"; done
-cp -R addons/WolkaraMobile "$APP/"
 cp LICENSE NOTICE.md WolkaraForever-LICENSE ZIPFoundation-LICENSE "$APP/"
 codesign --force --sign - "$APP" > /dev/null
 xcrun simctl install "$SIM_ID" "$APP"

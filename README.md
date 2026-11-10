@@ -23,12 +23,6 @@ adapted to Wolkara's edition selection and shared update lock, with interrupted-
 recovery fixes. Wolkara's website download flow replaces the API browser and credential setup.
 The imported MIT [license](WolkaraForever-LICENSE) is retained and shipped in the app.
 
-The optional mobile addon also adapts **[pookee's WolkaraRoue](https://github.com/pookee/wolkaraforever/tree/1843b131216352b883a14c5b7ca76b022dc9b69c/addons/WolkaraRoue)**:
-spell/item selection, action-button feedback and fitting original game windows.
-Thanks to pookee for that work. Its [MIT license](addons/WolkaraMobile/LICENSE)
-is retained; Wolkara's integration uses freely placed actions and original game
-frames, without importing the wheels, replacement unit frames or forced UI scale.
-
 This project is not affiliated with or endorsed by Blizzard Entertainment.
 
 ## Try it with Xcode
@@ -63,6 +57,11 @@ WoW gameplay under this capability set remain untested.
   game data. Updates preserve settings and addons.
 - Apple's keyboard with iOS autocorrection and dismissal after Send, plus a
   touch trackpad with two-finger scrolling.
+- Both typed and dictated drafts have chat-colored destination buttons: Say,
+  Group (`/p`), BG, Reply whisper, General (`/1`) and Trade (`/2`). Tap one to
+  open command chat, replace its text with the reviewed message and send once.
+  General/Trade use the character's channel numbers; colors use WoW's defaults.
+  The normal Replace/Send actions remain available for non-chat fields.
 - Direct camera dragging with mouse mode off keeps the cursor anchored when a
   finger lifts and restarts elsewhere; taps click their screen position on lift.
 - A microphone button opens chat and transcribes speech into a visible local draft.
@@ -83,25 +82,6 @@ WoW gameplay under this capability set remain untested.
   individual circle sizing, independent groups of four and whole-layout movement/scaling. The initial layout
   has neutral, LT, RT and LT+RT groups; enable it in Settings → Touch abilities.
   Taps activate on lift; drags over circles control the camera/pointer without activating an ability.
-- **Settings → Mobile interface (WoW)**: optional companion addon for Forever,
-  bundled and updated before play, disabled by default. It keeps the original game
-  windows and their textures, fits them on screen, and adds a large menu of shortcuts.
-  **Arrange mobile abilities…** adds up to 64 spell/item/macro buttons. Select a
-  button to change its ability or size; drag it to move it. **Move/size all** edits
-  the group. **Done & save** explicitly reloads the game UI to persist the layout.
-  Editing and enable/disable requests wait until combat ends; there is no timed reload.
-  The layout survives toggling off and is saved per character. Original window scale,
-  clamping and anchors are restored on disabling. Existing controller settings remain.
-  With direct touch (mouse mode off), tap a bag item to right-click/use/equip it;
-  hold and release for item options; hold at least 0.45 s before dragging to move it.
-  A quick swipe keeps camera movement and never turns into an item-use click.
-  Physical mouse and trackpad clicks retain their normal meaning. Touch-ability
-  circles remain a separate setting: move/disable them if they overlap new icons.
-  Internal modified F6/F7 bindings carry individual UI gestures;
-  they are temporary overrides and do not rewrite saved game bindings. Modifier
-  presses/releases are balanced around each command; F8–F12 bag keys are not sent.
-  The game chat confirms enable/disable. `/wolkaramobile` reports addon status
-  and received host commands for troubleshooting.
 - Movable touch controls, opacity and size settings, shoulder-position swapping,
   an alignment grid and haptics. The mouse/keyboard/microphone/key toolbar also
   moves in Edit layout.

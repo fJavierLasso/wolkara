@@ -1,7 +1,6 @@
 // Synthetic UIKit touches only; no game is loaded or controlled by this fixture.
 #import "AppKit.h"
 #import "TouchControls.h"
-#import "AKMobileInterface.h"
 #import "TouchGamepad.h"
 #import "TouchActionOverlay.h"
 #include <assert.h>
@@ -15,12 +14,10 @@ extern CGError CGWarpMouseCursorPosition(CGPoint point);
 @property CGPoint point;
 @property UITouchPhase testPhase;
 @property UITouchType testType;
-@property NSTimeInterval testTime;
 @property(nonatomic,weak) UIView *host;
 @end
 @implementation CameraTouch
 - (CGPoint)locationInView:(UIView *)view { return self.host ? [self.host convertPoint:self.point toView:view] : self.point; }
-- (NSTimeInterval)timestamp { return self.testTime; }
 - (UITouchPhase)phase { return self.testPhase; }
 - (UITouchType)type { return self.testType; }
 - (UIView *)view { return self.host; }
@@ -213,111 +210,8 @@ static void CheckCamera(CGSize size, CGPoint start, BOOL right) {
     Send(host,event,other,UITouchPhaseMoved,moved); CheckEvent(drag,moved,size,moved.x-start.x,moved.y-start.y);
     Send(host,event,other,UITouchPhaseEnded,moved); CheckEvent(up,moved,size,0,0); Empty();
 }
-// A desktop input consumer tracks modifier edges separately from key events.
-// Reading modifierFlags only on keyDown (the old test) missed the broken bridge.
-static void Command(AKMobileCommand command, NSEventModifierFlags baseline) {
-    const NSEventModifierFlags groups[]={NSEventModifierFlagControl|NSEventModifierFlagOption|NSEventModifierFlagShift,
-        NSEventModifierFlagControl|NSEventModifierFlagOption|NSEventModifierFlagShift,
-        NSEventModifierFlagControl|NSEventModifierFlagOption,NSEventModifierFlagControl|NSEventModifierFlagOption,
-        NSEventModifierFlagControl|NSEventModifierFlagShift,NSEventModifierFlagControl|NSEventModifierFlagShift,
-        NSEventModifierFlagOption|NSEventModifierFlagShift,NSEventModifierFlagOption|NSEventModifierFlagShift};
-    const unsigned short codes[]={97,98,97,98,97,98,97,98}; // F6/F7 only; never a bag function key.
-    NSEventModifierFlags state=baseline;
-    const char *path=getenv("WOLKARA_MOBILE_EVENT_TRACE");
-    FILE *trace=(path && !baseline)?fopen(path,"a"):NULL;
-    BOOL down=NO, up=NO;
-    do {
-        NSEvent *event=Next(__LINE__);
-        if(trace) fprintf(trace,"%lu\t%lu\t%u\t%lu\n",(unsigned long)command,(unsigned long)event.type,event.keyCode,(unsigned long)event.modifierFlags);
-        if(event.type==NSEventTypeFlagsChanged) {
-            struct { unsigned short code; UIKeyboardHIDUsage usage; NSEventModifierFlags bit; } keys[]={
-                {59,0xE0,1},{62,0xE4,0x2000},{56,0xE1,2},{60,0xE5,4},
-                {58,0xE2,0x20},{61,0xE6,0x40},{55,0xE3,8},{54,0xE7,0x10}};
-            BOOL known=NO;
-            for(unsigned i=0;i<sizeof keys/sizeof *keys;i++) if(keys[i].code==event.keyCode) {
-                known=YES;
-                assert((state&keys[i].bit)!=(event.modifierFlags&keys[i].bit));
-                state=AKModifiersAfterKey(state,keys[i].usage,(event.modifierFlags&keys[i].bit)!=0);
-            }
-            assert(known && state==event.modifierFlags);
-        } else {
-            // Regression: the original bridge has no pressed modifier state here.
-            assert(state==event.modifierFlags);
-            assert((state&0x1E0000)==groups[command]);
-            assert(event.keyCode==codes[command]);
-            if(event.type==NSEventTypeKeyDown) { assert(!down && !up); down=YES; }
-            else { assert(event.type==NSEventTypeKeyUp && down && !up); up=YES; }
-        }
-    } while(!up || state!=baseline);
-    if(trace) fclose(trace);
-}
-static void CheckMobile(void) {
-    CGSize size=CGSizeMake(951,669);
-    NSWindow *window=[[NSWindow alloc] initWithContentRect:(CGRect){CGPointZero,size} styleMask:0 backing:0 defer:NO];
-    UIView *host=[[NSClassFromString(@"AKHostView") alloc] initWithFrame:(CGRect){CGPointZero,size}];
-    [host setValue:window forKey:@"nsWindow"]; [host layoutSubviews]; Empty();
-    AKTouchControls *controls=[host valueForKey:@"_touchControls"]; controls.trackpadEnabled=NO;
-    CameraTouch *finger=[CameraTouch new]; finger.host=host;
-    CameraEvent *event=[CameraEvent new]; event.touches=[NSSet setWithObject:finger];
-    [NSUserDefaults.standardUserDefaults setBool:YES forKey:AKMobileAvailableKey];
-    [NSUserDefaults.standardUserDefaults setBool:YES forKey:AKMobileEnabledKey];
-    AKMouseSetCaptured(false); CGPoint origin=CGPointMake(90,180), target=CGPointMake(120,190), anchor=CGPointMake(500,300);
-    Warp(anchor); Empty();
-    const char *tracePath=getenv("WOLKARA_MOBILE_EVENT_TRACE");
-    if(tracePath) { FILE *trace=fopen(tracePath,"w"); assert(trace); fclose(trace); }
-    // Exercise every command with no held keys and with real right-side modifiers,
-    // Command and Caps Lock. Synthetic chords must restore the exact hardware state.
-    const NSEventModifierFlags baselines[]={0,NSEventModifierFlagShift|4,
-        NSEventModifierFlagControl|0x2000,NSEventModifierFlagOption|0x40,
-        NSEventModifierFlagCommand|8,NSEventModifierFlagCapsLock,
-        NSEventModifierFlagControl|NSEventModifierFlagShift|NSEventModifierFlagOption|NSEventModifierFlagCommand|0x204C};
-    for(unsigned i=0;i<sizeof baselines/sizeof *baselines;i++) {
-        [host setValue:@(baselines[i]) forKey:@"_mods"];
-        for(AKMobileCommand command=AKMobileEnable;command<=AKMobileDrag;command++) {
-            [(id<AKMobileInterfaceHost>)host ak_mobileCommand:command]; Command(command,baselines[i]); Empty();
-            assert([[host valueForKey:@"_mods"] unsignedIntegerValue]==baselines[i]);
-        }
-    }
-    [host setValue:@0 forKey:@"_mods"];
-    [(id<AKMobileInterfaceHost>)host ak_mobileCommand:AKMobileDone]; Command(AKMobileDone,0);
-    // Both tap and hold are labelled BEFORE the click and cleared after its up.
-    for (unsigned hold=0;hold<2;hold++) {
-        finger.testTime=1; Send(host,event,finger,UITouchPhaseBegan,origin); Empty();
-        finger.testTime=hold?1.6:1.1; Send(host,event,finger,UITouchPhaseEnded,origin);
-        Command(hold?AKMobileHold:AKMobileTap,0);
-        CheckEvent(NSEventTypeMouseMoved,origin,size,0,0);
-        CheckEvent(NSEventTypeLeftMouseDown,origin,size,0,0); CheckEvent(NSEventTypeLeftMouseUp,origin,size,0,0);
-        Command(AKMobileClear,0); Empty();
-    }
-    // A quick swipe retains the camera anchor. Hold-drag starts at the item itself.
-    for (unsigned hold=0;hold<2;hold++) {
-        Warp(anchor); finger.testTime=2; Send(host,event,finger,UITouchPhaseBegan,origin);
-        finger.testTime=hold?2.6:2.1; Send(host,event,finger,UITouchPhaseMoved,target); Command(AKMobileDrag,0);
-        CGPoint down=hold?origin:anchor, moved=hold?target:CGPointMake(anchor.x+30,anchor.y+10);
-        if (hold) CheckEvent(NSEventTypeMouseMoved,origin,size,0,0);
-        CheckEvent(NSEventTypeLeftMouseDown,down,size,0,0);
-        CheckEvent(NSEventTypeLeftMouseDragged,moved,size,30,10);
-        Send(host,event,finger,UITouchPhaseEnded,target); CheckEvent(NSEventTypeLeftMouseUp,moved,size,0,0); Command(AKMobileClear,0); Empty();
-    }
-    // Edit mode permits immediate absolute placement, without delaying every drag.
-    [(id<AKMobileInterfaceHost>)host ak_mobileCommand:AKMobileEdit]; Command(AKMobileEdit,0);
-    finger.testTime=3; Send(host,event,finger,UITouchPhaseBegan,origin);
-    finger.testTime=3.1; Send(host,event,finger,UITouchPhaseMoved,target); Command(AKMobileDrag,0);
-    CheckEvent(NSEventTypeMouseMoved,origin,size,0,0); CheckEvent(NSEventTypeLeftMouseDown,origin,size,0,0);
-    CheckEvent(NSEventTypeLeftMouseDragged,target,size,30,10);
-    Send(host,event,finger,UITouchPhaseCancelled,target); Command(AKMobileDrag,0);
-    CheckEvent(NSEventTypeLeftMouseUp,target,size,0,0); Command(AKMobileClear,0); Empty();
-    [(id<AKMobileInterfaceHost>)host ak_mobileCommand:AKMobileDone]; Command(AKMobileDone,0);
-    // A physical pointer gets neither touch tags nor right-click conversion.
-    finger.testType=UITouchTypeIndirectPointer;
-    Send(host,event,finger,UITouchPhaseBegan,origin); CheckEvent(NSEventTypeLeftMouseDown,origin,size,0,0);
-    Send(host,event,finger,UITouchPhaseEnded,origin); CheckEvent(NSEventTypeLeftMouseUp,origin,size,0,0); Empty();
-    [NSUserDefaults.standardUserDefaults setBool:NO forKey:AKMobileEnabledKey];
-    [NSUserDefaults.standardUserDefaults setBool:NO forKey:AKMobileAvailableKey];
-}
 int main(void) { @autoreleasepool {
     [NSApplication sharedApplication];
-    [NSUserDefaults.standardUserDefaults setBool:NO forKey:AKMobileEnabledKey];
     const CGSize sizes[]={{852,393},{932,430},{951,669},{1194,834}};
     for (unsigned i=0;i<sizeof sizes/sizeof *sizes;i++) {
         CGSize size=sizes[i];
@@ -326,6 +220,5 @@ int main(void) { @autoreleasepool {
             CheckCamera(size,starts[j],j==2);
         }
     }
-    CheckMobile();
     puts("DIRECT_TOUCH_CAMERA_PASS");
 } return 0; }

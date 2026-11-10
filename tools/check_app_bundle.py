@@ -10,6 +10,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument("app", type=Path)
 args = parser.parse_args()
 app = args.app
+assert not (app / "WolkaraMobile").exists(), "Retired mobile interface must not ship"
 info = plistlib.loads((app / "Info.plist").read_bytes())
 assert info.get("UIFileSharingEnabled"), "Documents must be visible in Files"
 assert info.get("LSSupportsOpeningDocumentsInPlace"), "Files must support moving the installation in place"
@@ -19,12 +20,6 @@ assert not info.get("CADisableMinimumFrameDurationOnPhone", False), "Unexpected 
 assert "audio" in info.get("UIBackgroundModes", []), "Missing background audio declaration"
 for name in ("LICENSE", "NOTICE.md", "WolkaraForever-LICENSE", "ZIPFoundation-LICENSE", "Importing WoW.txt"):
     assert (app / name).is_file(), f"Missing bundled notice: {name}"
-mobile = app / "WolkaraMobile"
-assert (mobile / "LICENSE").is_file(), "Missing mobile addon attribution"
-for entry in (mobile / "WolkaraMobile.toc").read_text().splitlines():
-    if entry.endswith(".lua"):
-        assert (mobile / entry).is_file(), f"Missing mobile addon module: {entry}"
-assert "ns.hostEnabled = false" in (mobile / "Config.lua").read_text().replace("ns.hostEnabled=false", "ns.hostEnabled = false"), "Mobile UI must be opt-in"
 executable = app / info["CFBundleExecutable"]
 symbols = subprocess.check_output(["nm", "-g", str(executable)], text=True)
 assert "_TKWolkaraForeverRequestGamePlayback" in symbols, "Audio adapter hook was stripped"
