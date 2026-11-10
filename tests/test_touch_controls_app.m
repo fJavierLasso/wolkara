@@ -638,7 +638,9 @@ static void AKSavedTextSettle(UIViewController *presenter) {
         assert(!CGRectEqualToRect(item.frame, before));
         assert(CGRectContainsRect([controls toolbarBounds], item.frame));
         AKGamepadLayout *saved = [[AKGamepadLayout alloc] initWithDefaults:NSUserDefaults.standardUserDefaults];
-        CGRect restored = [saved frameForItem:item.accessibilityIdentifier defaultFrame:before inBounds:[controls toolbarBounds]];
+        NSMutableDictionary *frames = [NSMutableDictionary new];
+        for (UIView *control in items) frames[control.accessibilityIdentifier] = [NSValue valueWithCGRect:control.frame];
+        CGRect restored = [saved framesForToolbar:frames inBounds:[controls toolbarBounds]][item.accessibilityIdentifier].CGRectValue;
         assert(fabs(restored.origin.x-item.frame.origin.x)<0.01 && fabs(restored.origin.y-item.frame.origin.y)<0.01);
         [item removeGestureRecognizer:pan];
     }
@@ -655,14 +657,33 @@ static void AKSavedTextSettle(UIViewController *presenter) {
     AKToolbarTestPan *pan = [AKToolbarTestPan new]; assert(![controls gestureRecognizerShouldBegin:pan]);
     // Reconstruct positions at iPhone Pro/Max and Duo-like window sizes, portrait and landscape.
     CGRect original = host.bounds;
+    [controls setNeedsLayout]; [controls layoutIfNeeded];
+    NSMutableArray<NSValue *> *configured = [NSMutableArray new];
+    CGRect group = CGRectNull;
+    for (UIView *item in items) {
+        [configured addObject:[NSValue valueWithCGRect:item.frame]];
+        group = CGRectUnion(group, item.frame);
+    }
     for (NSValue *size in @[[NSValue valueWithCGSize:CGSizeMake(402,874)], [NSValue valueWithCGSize:CGSizeMake(440,956)],
                            [NSValue valueWithCGSize:CGSizeMake(956,440)], [NSValue valueWithCGSize:CGSizeMake(678,466)],
                            [NSValue valueWithCGSize:CGSizeMake(951,669)]]) {
         host.bounds = (CGRect){CGPointZero, size.CGSizeValue};
         [controls setNeedsLayout]; [controls layoutIfNeeded];
         for (UIView *item in items) assert(CGRectContainsRect([controls toolbarBounds], item.frame));
+        CGRect available = [controls toolbarBounds];
+        if (group.size.width <= available.size.width && group.size.height <= available.size.height) {
+            for (NSUInteger index = 0; index < items.count; index++) {
+                CGRect before = configured[index].CGRectValue, first = configured[0].CGRectValue;
+                assert(CGSizeEqualToSize(items[index].frame.size, before.size));
+                assert(fabs((items[index].frame.origin.x-items[0].frame.origin.x)-(before.origin.x-first.origin.x))<0.01);
+                assert(fabs((items[index].frame.origin.y-items[0].frame.origin.y)-(before.origin.y-first.origin.y))<0.01);
+            }
+        }
     }
     host.bounds = original;
+    [controls setNeedsLayout]; [controls layoutIfNeeded];
+    for (NSUInteger index = 0; index < items.count; index++)
+        assert(CGRectEqualToRect(items[index].frame, configured[index].CGRectValue));
     [gamepad.layout reset]; [controls setNeedsLayout]; [controls layoutIfNeeded];
     for (UIView *item in items) assert(fabs(item.frame.origin.y-[controls toolbarBounds].origin.y)<0.01);
     [NSNotificationCenter.defaultCenter removeObserver:observer];

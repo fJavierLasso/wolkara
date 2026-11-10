@@ -12,6 +12,8 @@
 
 @interface AKTouchActionLayout : NSObject
 - (instancetype)initWithDefaults:(NSUserDefaults *)defaults;
+- (instancetype)initWithDefaults:(NSUserDefaults *)defaults simple:(BOOL)simple;
+@property(nonatomic, readonly) BOOL simple;
 @property(nonatomic) BOOL enabled;
 @property(nonatomic) CGFloat scale, borderOpacity;
 @property(nonatomic) CGPoint center;

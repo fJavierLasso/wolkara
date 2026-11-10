@@ -74,7 +74,10 @@ WoW gameplay under this capability set remain untested.
 - Physical controller support and an on-screen controller when none is connected.
   Tap the controller toolbar button to switch Full/Simple; hold to turn it on/off.
   Simple keeps the left stick, LB/RB and menu, hiding both button rings, the right stick
-  and LT/RT. LB/RB positions are saved separately for Simple and Full.
+  and LT/RT. Full and Simple each remember their control/toolbar positions,
+  sizes, opacity, shoulder order, haptics and complete touch-ability layout.
+  Existing settings seed both profiles; subsequent edits and resets affect only
+  the selected mode, identified in Settings. The performance HUD remains global.
   Touch ability circles remain available. Double-tap the left stick for L3 or the
   right stick for R3. With the touch controller active, double-tapping bare game
   content in the lower-right quadrant also sends R3, including in Simple mode.

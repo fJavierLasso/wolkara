@@ -12,6 +12,7 @@
 @property(nonatomic, copy) void (^moveDrag)(UITouch *touch);
 @property(nonatomic, copy) void (^endDrag)(UITouch *touch, BOOL cancelled);
 @property(nonatomic, copy) void (^configurationChanged)(void);
+- (void)selectSimpleLayout:(BOOL)simple;
 - (void)beginEditing;
 - (void)finishEditing;
 - (void)releaseTouches;

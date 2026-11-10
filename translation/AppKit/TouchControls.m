@@ -576,13 +576,16 @@ static void AKEmitTouch(void *context, AKTrackpadAction action, double x, double
     BOOL compact = safe.size.width < 408;
     CGFloat width = compact ? 252 : 408;
     CGFloat x = CGRectGetMidX(safe) - width / 2;
+    NSMutableDictionary<NSString *,NSValue *> *defaults = [NSMutableDictionary new];
     for (NSUInteger index = 0; index < items.count; index++) {
         UIView *item = items[index];
         CGRect fallback = CGRectMake(x + index * 52, safe.origin.y, index == 5 ? 96 : 44, 44);
         if (compact && index == 5) fallback = CGRectMake(CGRectGetMidX(safe)-48, safe.origin.y+52, 96, 44);
         if (index == 6) fallback = compact ? CGRectMake(CGRectGetMidX(safe)+56, safe.origin.y+52, 44, 44) : CGRectMake(x+364, safe.origin.y, 44, 44);
-        item.frame = layout ? [layout frameForItem:item.accessibilityIdentifier defaultFrame:fallback inBounds:safe] : fallback;
+        defaults[item.accessibilityIdentifier] = [NSValue valueWithCGRect:fallback];
     }
+    NSDictionary<NSString *,NSValue *> *frames = layout ? [layout framesForToolbar:defaults inBounds:safe] : defaults;
+    for (UIView *item in items) item.frame = frames[item.accessibilityIdentifier].CGRectValue;
     _dictateButton.frame = CGRectMake(26, 0, 44, 44);
     _dictationSendButton.frame = CGRectMake(0, 0, 44, 44);
     _dictationCancelButton.frame = CGRectMake(52, 0, 44, 44);
@@ -622,7 +625,9 @@ static void AKEmitTouch(void *context, AKTrackpadAction action, double x, double
     CGRect frame = origin.CGRectValue;
     CGPoint delta = [pan translationInView:self];
     frame.origin.x += delta.x; frame.origin.y += delta.y;
-    [_gamepad.layout moveItem:key toFrame:frame inBounds:[self toolbarBounds]];
+    NSMutableDictionary<NSString *,NSValue *> *frames = [NSMutableDictionary new];
+    for (UIView *control in [self toolbarItems]) frames[control.accessibilityIdentifier] = [NSValue valueWithCGRect:control.frame];
+    [_gamepad.layout moveToolbarItem:key toFrame:frame currentFrames:frames inBounds:[self toolbarBounds]];
     [self setNeedsLayout]; [self layoutIfNeeded];
     if (pan.state == UIGestureRecognizerStateEnded || pan.state == UIGestureRecognizerStateCancelled) {
         [_gamepad.layout save];

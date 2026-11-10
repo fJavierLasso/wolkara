@@ -173,7 +173,7 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
         self.multipleTouchEnabled = YES;
         // Above the guest surface, below the cursor and keyboard toolbar.
         self.layer.zPosition = 99999;
-        _preferences = [[AKGamepadLayout alloc] initWithDefaults:NSUserDefaults.standardUserDefaults];
+        _preferences = [[AKGamepadLayout alloc] initWithDefaults:NSUserDefaults.standardUserDefaults simple:NO];
         _dragOrigins = [NSMutableDictionary new];
         _actions = [[AKTouchActionOverlay alloc] initWithFrame:self.bounds];
         _actions.autoresizingMask = UIViewAutoresizingFlexibleWidth|UIViewAutoresizingFlexibleHeight;
@@ -246,7 +246,15 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
     return control && !control.hidden && CGRectContainsPoint(control.bounds, [control convertPoint:point fromView:view]);
 }
 - (void)setControlsVisible:(BOOL)visible { _controlsVisible = visible; [self updateAppearance]; }
-- (void)setSimple:(BOOL)simple { _simple = simple; [self updateAppearance]; }
+- (void)setSimple:(BOOL)simple {
+    if (_simple == simple) return;
+    [self finishConfiguration];
+    [_actions selectSimpleLayout:simple];
+    _preferences = [[AKGamepadLayout alloc] initWithDefaults:NSUserDefaults.standardUserDefaults simple:simple];
+    _simple = simple; [self updateAppearance];
+    // Toolbar appearance/positions and the settings editor now use this profile.
+    [NSNotificationCenter.defaultCenter postNotificationName:AKGamepadLayoutDidChangeNotification object:NSUserDefaults.standardUserDefaults];
+}
 - (void)updateAppearance {
     self.hidden = !_controlsVisible && !self.configuring;
     _actions.active = _controlsVisible && !self.configuring;
@@ -400,7 +408,10 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
     [self addSubview:_settings];
     UIScrollView *scroll = [UIScrollView new]; scroll.translatesAutoresizingMaskIntoConstraints = NO;
     [_settings addSubview:scroll];
-    UIStackView *stack = [[UIStackView alloc] initWithArrangedSubviews:@[[self label:AKHostLocalized(@"touch.settings.title")]]];
+    NSString *mode = AKHostLocalized(_simple ? @"touch.gamepad.value.simple" : @"touch.gamepad.value.full");
+    UILabel *profile = [self label:AKHostLocalizedFormat(@"touch.settings.profile",mode)];
+    profile.accessibilityIdentifier = @"wolkara.controls.profile";
+    UIStackView *stack = [[UIStackView alloc] initWithArrangedSubviews:@[[self label:AKHostLocalized(@"touch.settings.title")],profile]];
     stack.axis = UILayoutConstraintAxisVertical; stack.spacing = 6; stack.translatesAutoresizingMaskIntoConstraints = NO;
     [scroll addSubview:stack];
     UIStackView *sizes = [UIStackView new], *options = [UIStackView new];

@@ -47,7 +47,8 @@ static void CircleTap(UIControl *circle,UIView *host) {
     AKAbilityTouch *touch=StartCircle(circle,host); [circle endTrackingWithTouch:touch withEvent:nil];
 }
 void TestTouchAbilitiesUI(UIView *host,AKTouchGamepad *manager,GCVirtualController *controller) {
-    [NSUserDefaults.standardUserDefaults removeObjectForKey:@"WolkaraTouchAbilitiesV1"];
+    for (NSString *key in @[@"WolkaraTouchAbilitiesV1",@"WolkaraTouchAbilitiesV2.full",@"WolkaraTouchAbilitiesV2.simple"])
+        [NSUserDefaults.standardUserDefaults removeObjectForKey:key];
     [manager toggleSettings]; Tap(host,@"wolkara.controls.abilities");
     assert(manager.configuring && manager.editing);
     UIControl *first=(id)Find(host,@"wolkara.ability.0.up"); assert(first);
@@ -126,11 +127,14 @@ void TestTouchAbilitiesUI(UIView *host,AKTouchGamepad *manager,GCVirtualControll
     AKTouchAction *mapped=overlay.layout.actions[0]; NSString *oldButton=mapped.button;
     NSUInteger oldModifiers=mapped.modifiers;
     for (NSString *name in @[@"LB",@"RB"]) {
-        mapped.button=name;
+        manager.simple=YES;
+        mapped=overlay.layout.actions[0]; mapped.button=name;
+        overlay.layout.enabled=YES;
+        first=(id)Find(host,@"wolkara.ability.0.up");
         GCControllerButtonInput *target=[name isEqual:@"LB"] ? pad.leftShoulder : pad.rightShoulder;
         NSString *element=[name isEqual:@"LB"] ? GCInputLeftShoulder : GCInputRightShoulder;
         for (NSUInteger mod=0;mod<4;mod++) {
-            mapped.modifiers=mod; manager.simple=YES; [host layoutIfNeeded];
+            mapped.modifiers=mod; [host layoutIfNeeded];
             __block NSUInteger presses=0;
             target.pressedChangedHandler=^(GCControllerButtonInput *button,float value,BOOL pressed) {
                 (void)button; (void)value;
@@ -140,7 +144,9 @@ void TestTouchAbilitiesUI(UIView *host,AKTouchGamepad *manager,GCVirtualControll
             CircleTap(first,host); Drain(); Drain();
             assert(presses==1 && !target.pressed); target.pressedChangedHandler=nil;
         }
-        manager.simple=NO; mapped.modifiers=0;
+        manager.simple=NO;
+        mapped=overlay.layout.actions[0]; mapped.button=name; mapped.modifiers=0;
+        first=(id)Find(host,@"wolkara.ability.0.up"); [host layoutIfNeeded];
         CircleTap(first,host);
         UIControl *manual=(id)Find(host,[@"tolkara.gamepad." stringByAppendingString:element]);
         [manual sendActionsForControlEvents:UIControlEventTouchDown]; Drain(); Drain();

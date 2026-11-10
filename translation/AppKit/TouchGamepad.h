@@ -17,7 +17,8 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size);
 @interface AKTouchGamepad : NSObject
 - (instancetype)initWithHostView:(UIView *)host;
 @property(nonatomic) BOOL enabled;
-/// Layout only: keeps the same connected controller and saved control positions.
+/// Selects independent Full/Simple appearance, positions and ability layouts.
+/// Keeps the same connected controller and releases any held input.
 @property(nonatomic) BOOL simple;
 @property(nonatomic) BOOL keyboardVisible;
 @property(nonatomic, readonly) BOOL visible;

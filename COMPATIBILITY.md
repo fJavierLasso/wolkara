@@ -672,4 +672,33 @@ orders. Shader-library lifetime and memory-journal regressions pass. The clean,
 signed generic iOS Release and shipped-bundle checks pass. Simulator lifecycle
 notifications and textures do not establish recovery in a real backgrounded game;
 the update was installed under the same bundle after the closed-app guard and
-the launcher started. The user's Duo gameplay check remains pending.
+the launcher started. The user subsequently reported that it works fairly well;
+this is user feedback rather than a capture proving the original failure's cause.
+
+## Independent Full/Simple control layouts (2026-11-10)
+
+Full and Simple now have separate persisted control positions, shoulder/stick
+sizes, opacity, shoulder order, haptics, toolbar placement and touch-ability
+layouts (enabled state, scale, anchor, borders, individual bindings, groups and
+circle sizes/visibility). Switching saves the outgoing profile and restores the
+incoming one, releasing held input and pending chords while keeping the same
+connected controller. Settings identifies the edited profile. Reset affects only
+the selected layout; the performance HUD remains a global preference.
+
+Both profiles are initialized from the existing settings before either can be
+edited. Existing identity-based Simple LB/RB positions survive, and legacy data
+is retained for rollback. Toolbar positions retain their fixed spacing and top/
+bottom edge anchors across resizing; if a window cannot fit the arrangement,
+its temporary fallback does not overwrite the saved profile.
+
+Model tests pass migration, first visit after editing the other profile, all
+appearance options, toolbar/ability independence, relaunch, reset and global
+HUD updates through stale profile objects. The native virtual-controller fixture
+passes repeated profile switches, restored geometry/appearance/settings/abilities
+and held-button cancellation without reconnection. Existing ability input/layout,
+controller lifecycle, toolbar resize/edit isolation, global HUD hide/show,
+localization and signed generic iOS Release/bundle checks pass. Device installation and the user's profile-switching check remain pending.
+
+Ongoing Wolkara work is published directly to `develop`. It retains the prior
+PR's complete history, including chat, retirement of the mobile experiment and
+background graphics recovery; no rewrite or main-branch merge is needed.

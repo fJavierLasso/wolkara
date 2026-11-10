@@ -573,3 +573,5 @@
 "touch.chat.general" = "To general · 1";
 "touch.chat.trade" = "To trade · 2";
 "touch.chat.send.hint" = "Sends this draft using %@ and closes the keyboard. Numbered channels use your current game channel list.";
+
+"touch.settings.profile" = "%@ layout · changes are saved separately";

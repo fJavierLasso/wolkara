@@ -22,12 +22,24 @@ static NSString *DefaultGroup(NSString *identifier) {
 
 @implementation AKTouchActionLayout {
     NSUserDefaults *_defaults;
+    NSString *_profileKey;
     NSMutableArray<AKTouchAction *> *_items;
 }
 - (instancetype)initWithDefaults:(NSUserDefaults *)defaults {
+    return [self initWithDefaults:defaults simple:[defaults boolForKey:@"TKTouchGamepadSimple"]];
+}
+- (instancetype)initWithDefaults:(NSUserDefaults *)defaults simple:(BOOL)simple {
     if ((self=[super init])) {
         _defaults=defaults; [self reset];
-        id stored=[defaults objectForKey:ActionsKey];
+        id legacy=[defaults objectForKey:ActionsKey];
+        if (![legacy isKindOfClass:NSDictionary.class]) legacy=@{};
+        for (NSString *mode in @[@"full",@"simple"]) {
+            NSString *key=[@"WolkaraTouchAbilitiesV2." stringByAppendingString:mode];
+            if (![defaults objectForKey:key]) [defaults setObject:legacy forKey:key];
+        }
+        _simple=simple;
+        _profileKey=[@"WolkaraTouchAbilitiesV2." stringByAppendingString:simple?@"simple":@"full"];
+        id stored=[defaults objectForKey:_profileKey];
         if (![stored isKindOfClass:NSDictionary.class]) return self;
         NSDictionary *saved=stored;
         _enabled=Number(saved[@"enabled"],0)!=0;
@@ -160,6 +172,6 @@ static NSString *DefaultGroup(NSString *identifier) {
 - (void)save {
     NSMutableArray *actions=[NSMutableArray new];
     for (AKTouchAction *a in _items) [actions addObject:@{@"id":a.identifier,@"group":a.groupIdentifier?:a.identifier,@"button":a.button,@"modifiers":@(a.modifiers),@"x":@(a.position.x),@"y":@(a.position.y),@"diameter":@(a.diameter),@"enabled":@(a.enabled)}];
-    [_defaults setObject:@{@"enabled":@(self.enabled),@"scale":@(self.scale),@"border":@(self.borderOpacity),@"x":@(self.center.x),@"y":@(self.center.y),@"actions":actions} forKey:ActionsKey];
+    [_defaults setObject:@{@"enabled":@(self.enabled),@"scale":@(self.scale),@"border":@(self.borderOpacity),@"x":@(self.center.x),@"y":@(self.center.y),@"actions":actions} forKey:_profileKey];
 }
 @end

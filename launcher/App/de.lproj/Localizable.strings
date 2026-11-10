@@ -572,3 +572,5 @@
 "touch.chat.general" = "Allgemein · 1";
 "touch.chat.trade" = "Handel · 2";
 "touch.chat.send.hint" = "Sendet diesen Entwurf mit %@ und schließt die Tastatur. Nummerierte Kanäle verwenden die aktuelle Kanalliste im Spiel.";
+
+"touch.settings.profile" = "Layout %@ · Änderungen werden getrennt gespeichert";

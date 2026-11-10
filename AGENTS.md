@@ -30,6 +30,12 @@ tools/package_ipa.sh                          # unsigned generic TolkaraDiagnost
 
 Device installs replace the app under the same bundle ID and keep its data.
 
+## Wolkara Branch Workflow
+
+Publish requested Wolkara updates directly to `develop` in
+`fJavierLasso/wolkara`. Keep completed work there when closing obsolete PRs;
+do not keep appending new tasks to a previously used PR.
+
 ## Coding Style & Naming Conventions
 
 Four-space indentation in source files, two spaces in YAML; match surrounding conventions without unrelated reformatting. Preserve module prefixes such as `gm_`, `AK` and `TK`. Tests are named `test_*.{c,m,swift,py}`. Compiler warnings are errors in the regression scripts.

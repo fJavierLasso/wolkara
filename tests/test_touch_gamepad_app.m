@@ -3,6 +3,7 @@
 #import <UIKit/UIKit.h>
 #import "../translation/AppKit/TouchGamepad.h"
 #import "../translation/AppKit/TouchGamepadLayout.h"
+#import "../translation/AppKit/TouchActionOverlay.h"
 #import "../translation/AppKit/TouchHaptics.h"
 #import "../translation/AppKit/TouchStickButtons.h"
 #include <assert.h>
@@ -171,7 +172,7 @@ static void TestPreferences(void) {
     assert(fabs([[AKGamepadLayout alloc] initWithDefaults:defaults].opacity-.3)<.001);
     // Explicit current values (even malformed ones) must not resurrect old values.
     [defaults setObject:@{@"opacity":@"bad",@"rearScale":@99,@"frontScale":@(-2),
-        @"positions":@{@"broken":@[@"x",@0],@"left":@[@(-1),@4]}} forKey:@"WolkaraForeverTouchLayoutV1"];
+        @"positions":@{@"broken":@[@"x",@0],@"left":@[@(-1),@4]}} forKey:@"WolkaraTouchLayoutV2.full"];
     AKGamepadLayout *layout=[[AKGamepadLayout alloc] initWithDefaults:defaults];
     assert(layout.opacity==0.8 && layout.rearScale==1.5 && layout.frontScale==0.65 && layout.hapticsEnabled);
     layout.opacity=NAN; layout.rearScale=INFINITY; layout.frontScale=-INFINITY;
@@ -216,6 +217,8 @@ static void TestSimpleShoulderPositions(UIView *host, AKPreviewGamepad *manager)
     UIView *overlay=Button(host,GCInputLeftShoulder).superview;
     NSArray *names=@[GCInputLeftShoulder,GCInputRightShoulder];
     for (NSUInteger swapped=0;swapped<2;swapped++) {
+        // Reset each profile explicitly; resetting Full no longer erases Simple.
+        manager.simple=YES; [manager.layout reset];
         manager.simple=NO; [manager.layout reset]; manager.layout.swapShoulders=swapped;
         [manager.layout save]; [overlay setNeedsLayout]; [host layoutIfNeeded];
         EditShoulders(host,manager,CGPointMake(10,45),NO);
@@ -225,13 +228,14 @@ static void TestSimpleShoulderPositions(UIView *host, AKPreviewGamepad *manager)
         EditShoulders(host,manager,CGPointMake(35,90),NO);
         for (NSUInteger i=0;i<2;i++) { simple[i]=Button(host,names[i]).frame; assert(!SameFrame(full[i],simple[i])); }
         // Saving/reloading keeps separate keys without changing legacy full slots.
-        AKGamepadLayout *saved=[[AKGamepadLayout alloc] initWithDefaults:NSUserDefaults.standardUserDefaults];
+        AKGamepadLayout *saved=[[AKGamepadLayout alloc] initWithDefaults:NSUserDefaults.standardUserDefaults simple:YES];
+        AKGamepadLayout *savedFull=[[AKGamepadLayout alloc] initWithDefaults:NSUserDefaults.standardUserDefaults simple:NO];
         CGRect safe=UIEdgeInsetsInsetRect(overlay.bounds,overlay.safeAreaInsets);
         for (NSUInteger i=0;i<2;i++) {
             NSString *key=i?@"simple.RB":@"simple.LB";
             NSString *fullKey=i?(swapped?@"RT":@"RB"):(swapped?@"LT":@"LB");
             assert(SameFrame([saved frameForItem:key defaultFrame:simple[i] inBounds:safe],simple[i]));
-            assert(SameFrame([saved frameForItem:fullKey defaultFrame:full[i] inBounds:safe],full[i]));
+            assert(SameFrame([savedFull frameForItem:fullKey defaultFrame:full[i] inBounds:safe],full[i]));
             CGRect small=CGRectMake(10,10,300,200);
             assert(CGRectContainsRect(small,[saved frameForItem:key defaultFrame:simple[i] inBounds:small]));
             assert(SameFrame([saved frameForItem:key defaultFrame:simple[i] inBounds:safe],simple[i]));
@@ -252,6 +256,52 @@ static void TestSimpleShoulderPositions(UIView *host, AKPreviewGamepad *manager)
     }
     manager.simple=NO; [manager.layout reset]; [overlay setNeedsLayout]; [host layoutIfNeeded];
     puts("SIMPLE_SHOULDER_POSITIONS_PASS: independent Full/Simple drags, cancelled edits, save/reload, slot swapping, clamping and same connected controller.");
+}
+static void TestProfileSwitching(UIView *host, AKPreviewGamepad *manager) {
+    GCVirtualController *connection=manager.created;
+    manager.simple=NO;
+    UIView *left=Find(host,@"wolkaraforever.layout.left");
+    UIView *overlay=left.superview;
+    AKTouchActionOverlay *abilities=(id)Find(host,@"wolkara.ability.0.up").superview;
+    assert(abilities);
+    CGRect safe=UIEdgeInsetsInsetRect(overlay.bounds,overlay.safeAreaInsets);
+    manager.layout.frontScale=1.3; manager.layout.rearScale=1.2; manager.layout.opacity=.3;
+    manager.layout.hapticsEnabled=NO;
+    [manager.layout moveItem:@"left" toFrame:CGRectMake(100,100,280.8,280.8) inBounds:safe];
+    [manager.layout save];
+    abilities.layout.enabled=YES; abilities.layout.scale=1.4;
+    abilities.layout.actions[0].diameter=70; [abilities.layout save];
+    manager.simple=YES;
+    manager.layout.frontScale=.7; manager.layout.rearScale=.8; manager.layout.opacity=.7;
+    manager.layout.hapticsEnabled=YES;
+    [manager.layout moveItem:@"left" toFrame:CGRectMake(safe.origin.x+20,210,151.2,151.2) inBounds:safe];
+    [manager.layout save];
+    abilities.layout.enabled=NO; abilities.layout.scale=.8; abilities.layout.actions[0].diameter=30;
+    [abilities.layout save];
+    for (unsigned i=0;i<4;i++) {
+        manager.simple=NO; [host layoutIfNeeded];
+        assert(manager.created==connection && manager.visible && !manager.layout.simple);
+        assert(fabs(left.frame.size.width-280.8)<.01 && fabs(left.frame.origin.x-100)<.01 && fabs(left.alpha-.3)<.01);
+        assert(!manager.feedback.enabled && abilities.layout.enabled && !abilities.hidden);
+        assert(abilities.layout.actions[0].diameter==70 && abilities.layout.scale==1.4);
+        // A held Full-mode action is released before switching profiles.
+        [Button(host,GCInputButtonA) sendActionsForControlEvents:UIControlEventTouchDown]; Drain();
+        assert(connection.controller.extendedGamepad.buttonA.pressed);
+        manager.simple=YES; Drain(); [host layoutIfNeeded];
+        assert(!connection.controller.extendedGamepad.buttonA.pressed);
+        assert(manager.created==connection && manager.visible && manager.layout.simple);
+        assert(fabs(left.frame.size.width-151.2)<.01 && fabs(left.frame.origin.x-safe.origin.x-20)<.01 && fabs(left.alpha-.7)<.01);
+        assert(manager.feedback.enabled && !abilities.layout.enabled && abilities.hidden);
+        assert(abilities.layout.actions[0].diameter==30 && abilities.layout.scale==.8);
+        [manager toggleSettings];
+        UILabel *title=(id)Find(host,@"wolkara.controls.profile"); assert(title && [title.text containsString:@"Simple"]);
+        assert(fabs(((UISlider *)Find(host,@"wolkaraforever.controls.frontScale")).value-.7)<.01);
+        [manager toggleSettings];
+    }
+    [manager.layout reset]; [abilities.layout reset]; [abilities.layout save];
+    manager.simple=NO; [manager.layout reset]; [abilities.layout reset]; [abilities.layout save];
+    [overlay setNeedsLayout]; [host layoutIfNeeded];
+    puts("CONTROL_PROFILES_UI_PASS: mode-specific geometry, appearance, settings, abilities and held-button release without reconnection.");
 }
 static void TestNativeInput(UIView *host, AKPreviewGamepad *manager) {
     GCExtendedGamepad *pad=manager.created.controller.extendedGamepad;
@@ -480,6 +530,7 @@ static void TestNativeInput(UIView *host, AKPreviewGamepad *manager) {
     assert(CGRectGetMidX(Button(host,GCInputLeftTrigger).frame)>CGRectGetMidX(Button(host,GCInputLeftShoulder).frame));
     assert(CGRectGetMidX(Button(host,GCInputRightTrigger).frame)<CGRectGetMidX(Button(host,GCInputRightShoulder).frame));
     TestSimpleShoulderPositions(host,manager);
+    TestProfileSwitching(host,manager);
     TestPreferences();
     manager.keyboardVisible=YES; Drain();
     assert(!manager.visible && !pad.leftShoulder.pressed && !pad.buttonA.pressed);
@@ -590,8 +641,10 @@ static void TestLifecycle(UIView *host) {
         return;
     }
     BOOL test=[NSProcessInfo.processInfo.arguments containsObject:@"--self-test"];
-    if (test || [NSProcessInfo.processInfo.arguments containsObject:@"--self-test-input"])
-        [NSUserDefaults.standardUserDefaults removeObjectForKey:@"WolkaraForeverTouchLayoutV1"];
+    if (test || [NSProcessInfo.processInfo.arguments containsObject:@"--self-test-input"]) {
+        for (NSString *key in @[@"WolkaraForeverTouchLayoutV1",@"WolkaraTouchLayoutV2.full",@"WolkaraTouchLayoutV2.simple",@"WolkaraTouchAbilitiesV2.full",@"WolkaraTouchAbilitiesV2.simple",@"TKTouchGamepadSimple"])
+            [NSUserDefaults.standardUserDefaults removeObjectForKey:key];
+    }
     if (test) { TestLifecycle(self.window.rootViewController.view); fflush(stdout); exit(0); }
     self.gamepad=[[AKPreviewGamepad alloc] initWithHostView:self.window.rootViewController.view];
     UIButton *settings=[UIButton buttonWithType:UIButtonTypeSystem];

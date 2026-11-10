@@ -149,7 +149,7 @@ static void LayoutTests(void) {
     AKTouchAction *added=[layout addAction]; assert(added && layout.actions.count==33); [layout removeAction:added];
     layout.scale=NAN; layout.center=CGPointMake(INFINITY,NAN); assert(isfinite(layout.scale)&&isfinite(layout.center.x)&&isfinite(layout.center.y));
     [layout reset]; [layout save]; assert(layout.actions.count==32&&!layout.enabled);
-    [defaults setObject:@{@"actions":@[@{},@"bad",@{@"id":@"bad",@"button":@"unknown"}],@"scale":@"bad"} forKey:@"WolkaraTouchAbilitiesV1"];
+    [defaults setObject:@{@"actions":@[@{},@"bad",@{@"id":@"bad",@"button":@"unknown"}],@"scale":@"bad"} forKey:@"WolkaraTouchAbilitiesV2.full"];
     layout=[[AKTouchActionLayout alloc] initWithDefaults:defaults]; assert(layout.actions.count==0 && layout.scale==1);
     [defaults removePersistentDomainForName:suite];
     puts("TOUCH_ABILITIES_LAYOUT_PASS: screenshot mapping, block translation/scaling, individual edits, persistence, phone sizes, clamping and malformed preferences.");
@@ -190,10 +190,10 @@ static void GroupTests(void) {
     // Old custom positions/bindings migrate in place; groups follow original
     // identifiers, so changing an arrow's binding cannot move it to another diamond.
     layout.enabled=YES; layout.actions[0].button=@"B"; [layout save];
-    NSMutableDictionary *stored=[[defaults dictionaryForKey:@"WolkaraTouchAbilitiesV1"] mutableCopy];
+    NSMutableDictionary *stored=[[defaults dictionaryForKey:@"WolkaraTouchAbilitiesV2.full"] mutableCopy];
     NSMutableArray *legacy=[NSMutableArray new];
     for (NSDictionary *item in stored[@"actions"]) { NSMutableDictionary *a=item.mutableCopy; [a removeObjectForKey:@"group"]; [legacy addObject:a]; }
-    stored[@"actions"]=legacy; [defaults setObject:stored forKey:@"WolkaraTouchAbilitiesV1"];
+    stored[@"actions"]=legacy; [defaults setObject:stored forKey:@"WolkaraTouchAbilitiesV2.full"];
     CGPoint position=layout.actions[0].position;
     layout=[[AKTouchActionLayout alloc] initWithDefaults:defaults];
     assert(layout.enabled && [layout groupForAction:layout.actions[0]].count==4 && [layout.actions[0].button isEqual:@"B"]);

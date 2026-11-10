@@ -78,12 +78,18 @@
 - (instancetype)initWithFrame:(CGRect)frame {
     if ((self=[super initWithFrame:frame])) {
         self.multipleTouchEnabled=YES;
-        _layout=[[AKTouchActionLayout alloc] initWithDefaults:NSUserDefaults.standardUserDefaults];
+        _layout=[[AKTouchActionLayout alloc] initWithDefaults:NSUserDefaults.standardUserDefaults simple:NO];
         [self rebuildCircles];
         UIPinchGestureRecognizer *pinch=[[UIPinchGestureRecognizer alloc] initWithTarget:self action:@selector(pinch:)];
         pinch.delegate=self; [self addGestureRecognizer:pinch];
     }
     return self;
+}
+- (void)selectSimpleLayout:(BOOL)simple {
+    if (_layout.simple==simple) return;
+    [self finishEditing]; [self releaseTouches]; [_layout save];
+    _layout=[[AKTouchActionLayout alloc] initWithDefaults:NSUserDefaults.standardUserDefaults simple:simple];
+    _selected=nil; [self rebuildCircles];
 }
 - (CGRect)placementBounds { return self.bounds; } // Same viewport as the game's UI, including its bottom anchor.
 - (void)rebuildCircles {
