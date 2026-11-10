@@ -113,18 +113,32 @@
 
 @interface AKChatFixtureView : AKInputFixtureView
 @property BOOL chatOpen;
-@property NSUInteger strayKeys;
-@property NSMutableArray<NSString *> *sent;
+@property NSUInteger strayKeys, escapes, menus;
+@property NSString *afterSubmit;
+@property NSMutableArray<NSString *> *sent, *keyEdges;
 @end
 @implementation AKChatFixtureView
+- (void)keyUp:(NSEvent *)event {
+    [self.keyEdges addObject:[NSString stringWithFormat:@"up:%hu",event.keyCode]];
+}
 - (void)keyDown:(NSEvent *)event {
+    [self.keyEdges addObject:[NSString stringWithFormat:@"down:%hu",event.keyCode]];
+    if (event.keyCode == 53) {
+        self.escapes++;
+        if (!self.chatOpen) self.menus++;
+        self.chatOpen = NO; [self.text setString:@""]; self.selection = NSMakeRange(0,0); return;
+    }
     if (event.keyCode == 44 && !self.chatOpen) {
         self.chatOpen = YES; [self.text setString:@""]; self.selection = NSMakeRange(0,0);
     }
     if (!self.chatOpen) { self.strayKeys++; return; }
     if (event.keyCode == 36) {
-        [self.sent addObject:[self.text copy]]; self.chatOpen = NO;
-        [self.text setString:@""]; self.selection = NSMakeRange(0,0); return;
+        [self.sent addObject:[self.text copy]];
+        // Observed on the Forever client: publishing leaves the editor open,
+        // empty after voice, or with the command shortcut after typed input.
+        // An explicit closing Escape must consume this state, not a second Return.
+        [self.text setString:self.afterSubmit ?: @""];
+        self.selection = NSMakeRange(self.text.length,0); return;
     }
     [super keyDown:event];
 }
@@ -454,23 +468,27 @@ static void AKSavedTextSettle(UIViewController *presenter) {
     UIView *host = [self.guest valueForKey:@"_host"];
     AKTouchControls *controls = [host valueForKey:@"_touchControls"];
     AKChatFixtureView *chat = [[AKChatFixtureView alloc] initWithFrame:self.guest.frame];
-    chat.sent = [NSMutableArray new]; self.guest.contentView = chat; [self.guest makeFirstResponder:chat];
+    chat.sent = [NSMutableArray new]; chat.keyEdges = [NSMutableArray new]; self.guest.contentView = chat; [self.guest makeFirstResponder:chat];
     UITextView *draft = [controls valueForKey:@"_keyboardInput"];
     NSArray *channels = @[@"say",@"group",@"bg",@"reply",@"general",@"trade"];
     NSArray *commands = @[@"/say",@"/p",@"/bg",@"/reply",@"/1",@"/2"];
-    for (NSUInteger i=0; i<channels.count; i++) for (NSNumber *open in @[@NO,@YES]) {
-        chat.chatOpen = open.boolValue;
+    for (NSUInteger i=0; i<channels.count; i++) for (NSNumber *open in @[@NO,@YES]) for (NSString *residue in @[@"",@"/"]) {
+        chat.chatOpen = open.boolValue; chat.afterSubmit = residue;
         [chat.text setString:@"old unsent message"]; chat.selection = NSMakeRange(3,0);
         [controls toggleKeyboard]; AKDrainFixtureEvents();
         UIButton *button = (id)AKFindInputView(host,[@"wolkara.chat." stringByAppendingString:channels[i]]);
         assert(button && !button.enabled);
         [draft insertText:@"  canción mañana café 🙂\n/reload\t  "];
         assert(button.enabled && !draft.superview.hidden);
-        NSUInteger count = chat.sent.count;
+        NSUInteger count = chat.sent.count, escapes = chat.escapes;
+        [chat.keyEdges removeAllObjects];
         [button sendActionsForControlEvents:UIControlEventTouchUpInside];
         [button sendActionsForControlEvents:UIControlEventTouchUpInside];
         AKDrainFixtureEvents();
-        assert(chat.sent.count == count+1 && !chat.chatOpen && !chat.strayKeys);
+        assert(chat.sent.count == count+1 && !chat.chatOpen && !chat.text.length && !chat.strayKeys);
+        assert(chat.escapes == escapes+1 && !chat.menus);
+        NSArray *tail = [chat.keyEdges subarrayWithRange:NSMakeRange(chat.keyEdges.count-4,4)];
+        assert(([tail isEqual:@[@"down:36",@"up:36",@"down:53",@"up:53"]]));
         NSString *expected = [NSString stringWithFormat:@"%@ canción mañana café 🙂 /reload",commands[i]];
         assert([chat.sent.lastObject isEqual:expected]);
         assert(!draft.text.length && draft.superview.hidden && !controls.keyboardVisible);
@@ -486,7 +504,7 @@ static void AKSavedTextSettle(UIViewController *presenter) {
     assert(chat.sent.count == count);
     [controls dismissKeyboard];
     assert(![controls touchSendChatText:@"hello" channel:@"unknown"] && chat.sent.count == count);
-    NSLog(@"TOUCH_UI_SELF_TEST_PASS: six chat destinations, open/closed chat, Unicode, control sanitizing, one submit, no stray keys, composition and empty draft guards");
+    NSLog(@"TOUCH_UI_SELF_TEST_PASS: six chat destinations, open/closed chat, empty/slash residue cleared, one submit and closing Escape, no menu or held keys, Unicode and composition guards");
     exit(EXIT_SUCCESS);
 }
 - (void)checkReviewedVoiceDraft {

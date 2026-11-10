@@ -935,10 +935,14 @@ static void AKEmitTouch(void *context, AKTrackpadAction action, double x, double
     // The command-chat shortcut opens a closed chat and only adds a slash to
     // an already open one. Replacing the field then removes that slash and any
     // old draft. Return would toggle an unknown field or publish old text.
-    // Queue one ordered transaction, with one final Return and no extra Esc.
+    // Queue one ordered transaction. Forever leaves its editor open after
+    // publishing (sometimes with a slash after typed input). Match the existing
+    // dictation confirmation: one Return, then one Escape to close that editor.
+    // A second Escape would open the game menu.
     [target touchSpecialKey:44 characters:@"/"];
     [target touchReplaceText:[NSString stringWithFormat:@"%@ %@",command,message]];
     [target touchSpecialKey:36 characters:@"\r"];
+    [target touchSpecialKey:53 characters:@"\x1b"];
     return YES;
 }
 - (void)sendChatChannel:(UIButton *)button {

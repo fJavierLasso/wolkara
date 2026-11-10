@@ -614,7 +614,8 @@ initialization in the game remains a user check.
   preserved. The retired host flags are cleared; no companion addon is shipped.
 - Typed and speech drafts offer six explicit, chat-colored send destinations:
   Say, Group, BG, Reply whisper, General 1 and Trade 2. A channel tap uses the
-  command-chat shortcut, replaces the field and queues one final Return. It
+  command-chat shortcut, replaces the field and queues one Return followed by
+  one closing Escape. It
   works whether chat was open or closed in the synthetic input fixture. The
   normal Replace/Send path for other fields is unchanged. Numbers and colors
   use the default WoW channel convention, not live character configuration.
@@ -625,7 +626,18 @@ initialization in the game remains a user check.
   localization. The UIKit preview confirms readable per-channel colors.
 - The same-bundle update was installed and launched on the Duo. Device readback
   confirms WolkaraMobile is archived outside AddOns and ControllerForever,
-  Questie and QuestieDB remain active. Actual chat sends await user testing.
+  Questie and QuestieDB remain active. The user confirmed Say delivery from
+  both keyboard and voice, but reported that its editor stayed open afterward.
 - Signed generic Release and shipped-bundle validation passed; the bundle has
-  no WolkaraMobile resource. Server delivery and channel availability still
+  no WolkaraMobile resource. Other channels and the closing correction still
   require the user's real-game check; synthetic tests do not establish those.
+
+### Channel chat closure follow-up
+
+The first device test left an empty chat after voice and a slash after typed
+input. The shared channel route now ends with the same single Escape as the
+previously verified dictation confirmation. Neither the keyboard nor the speech
+controller adds another Escape. The regression fixture now models an editor
+that stays open after publishing, including the slash residue, instead of
+assuming Return closed it. It checks one message, cleared text, a closed editor,
+no menu activation and a matching key-up after every closing key.
