@@ -704,3 +704,25 @@ its data, and the launcher started. The user's profile-switching check remains p
 Ongoing Wolkara work is published directly to `develop`. It retains the prior
 PR's complete history, including chat, retirement of the mobile experiment and
 background graphics recovery; no rewrite or main-branch merge is needed.
+
+## Game Mode declaration (2026-11-11)
+
+Both host Info.plist files now set `LSSupportsGameMode` to true: the integrated
+Wolkara host and the shared diagnostics/External JIT host metadata. This is the
+[documented Game Mode opt-in](https://developer.apple.com/documentation/bundleresources/information-property-list/lssupportsgamemode);
+Apple describes automatic activation for full-screen games in [WWDC25](https://developer.apple.com/videos/play/wwdc2025/209/).
+System eligibility and the user's Game Mode selection still determine activation.
+
+The previous signed integrated app already carried increased-memory-limit and
+extended-virtual-addressing entitlements; these remain present. Game Mode is not
+a new memory entitlement or a guarantee of two additional GiB. The previous Duo
+foreground journal sample contained 3472.9 MiB footprint and 2671.1 MiB available
+(6144 MiB in sum). This is a recorded process memory/headroom observation, not a
+measurement of physical RAM or proof of an exact hard limit.
+
+Both source plists validate. The clean signed generic iOS Release passes the
+shipped-bundle check, declares Game Mode in its final Info.plist and retains both
+memory entitlements in its signature. Installed over the existing Duo app after
+the closed-app guard, preserving data. Launch was refused because the device
+was locked. On-device Game Mode activation and a comparable post-update memory
+sample remain pending; no extra-memory gain is claimed yet.

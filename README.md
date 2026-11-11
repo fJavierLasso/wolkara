@@ -93,6 +93,9 @@ WoW gameplay under this capability set remain untested.
   or collapse; drag to reposition. Monitoring stops when hidden or backgrounded;
   it does not raise the rendering limit. GPU timing covers the presenting command
   buffer, not all GPU work in the system.
+- Declares support for Apple's Game Mode so the system can enable it during
+  full-screen play. The integrated build retains its increased-memory-limit
+  entitlement; Game Mode does not promise a fixed amount of extra memory.
 - **Add-ons** on the launcher: open **Browse CurseForge**, find the addon on the
   real website and choose its ZIP download. Wolkara receives the browser download,
   validates the archive and installs it automatically. No API key is needed.
