@@ -113,3 +113,12 @@ bool nc_write(NativeCodeMemory *memory, size_t offset, const void *bytes, size_t
     sys_icache_invalidate((char *)memory->executable + offset, size);
     return true;
 }
+bool nc_clear(NativeCodeMemory *memory, size_t size) {
+    if (!memory || !memory->published || memory->quarantined || !memory->executable ||
+        !memory->writable || size > memory->size) { errno = EINVAL; return false; }
+    if (!size) return true;
+    memset(memory->writable, 0, size);
+    sys_dcache_flush(memory->writable, size);
+    sys_icache_invalidate(memory->executable, size);
+    return true;
+}

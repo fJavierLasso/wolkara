@@ -43,5 +43,8 @@ bool nc_adopt(NativeCodeMemory *memory, void *executable, size_t size);
 // Caller must ensure no thread is executing the range while it is being changed.
 // Copies through RW, flushes caches, and keeps the RX protection unchanged.
 bool nc_write(NativeCodeMemory *memory, size_t offset, const void *bytes, size_t size);
+// Clears the image's extent through RW and flushes both aliases before placement.
+// Caller must ensure no thread is executing the range while it is being changed.
+bool nc_clear(NativeCodeMemory *memory, size_t size);
 // Unmaps both views, adopted ones too; quarantine is kept.
 void nc_destroy(NativeCodeMemory *memory);

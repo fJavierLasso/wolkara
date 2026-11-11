@@ -74,6 +74,7 @@ int main(void) {
     assert(quarantine.executable && quarantine.writable && quarantine.quarantined && !quarantine.published);
     assert(!(protection(quarantine.executable)&VM_PROT_WRITE) && !(protection(quarantine.writable)&VM_PROT_WRITE));
     assert(!nc_write(&quarantine,0,data,sizeof data));
+    assert(!nc_clear(&quarantine,page) && errno==EINVAL);
     void *retained=quarantine.executable;
     nc_destroy(&quarantine);
     assert(quarantine.executable==retained && ((unsigned char *)retained)[0]==0);
@@ -101,6 +102,34 @@ int main(void) {
     // Adopted, the region is ours: teardown unmaps it with the alias.
     assert(!mapped(foreign) && !mapped(alias));
 
+    // An enabler touches every page before adoption. Zero-fill sections must
+    // read as zero through RX even when no image bytes are placed in them.
+    void *touched=mmap(NULL,3*page,PROT_READ|PROT_WRITE,MAP_PRIVATE|MAP_ANON,-1,0);
+    assert(touched!=MAP_FAILED);
+    memset(touched,0x69,3*page);
+    assert(!mprotect(touched,3*page,PROT_READ));
+    NativeCodeMemory clearing={0};
+    assert(nc_adopt(&clearing,touched,3*page));
+    assert(!nc_clear(NULL,page) && errno==EINVAL);
+    assert(!nc_clear(&clearing,3*page+1) && errno==EINVAL);
+    assert(!nc_clear(&clearing,SIZE_MAX) && errno==EINVAL);
+    assert(((unsigned char *)clearing.executable)[0]==0x69);
+    assert(nc_clear(&clearing,0));
+    assert(((unsigned char *)clearing.executable)[0]==0x69);
+    assert(nc_clear(&clearing,2*page));
+    for(size_t i=0;i<2*page;i++)assert(((unsigned char *)clearing.executable)[i]==0);
+    for(size_t i=2*page;i<3*page;i++)assert(((unsigned char *)clearing.executable)[i]==0x69);
+    assert(!(protection(clearing.executable)&VM_PROT_WRITE));
+    assert(nc_write(&clearing,page-8,data,sizeof data));
+    assert(!memcmp((char *)clearing.executable+page-8,data,sizeof data));
+    assert(((unsigned char *)clearing.executable)[page+8]==0);
+    assert(nc_clear(&clearing,2*page));
+    assert(((unsigned char *)clearing.executable)[page-8]==0);
+    alias=clearing.writable;
+    nc_destroy(&clearing);
+    assert(!mapped(touched) && !mapped(alias));
+    assert(!nc_clear(&clearing,page) && errno==EINVAL);
+
     unsigned old_calls=calls;
     assert(!nc_create_managed(&memory,page,uncertain_pages,&calls,&quarantine) && errno==EINVAL);
     assert(calls==old_calls); // No second helper attempt or allocation.
@@ -120,5 +149,5 @@ int main(void) {
     assert(!nc_create_managed(&large,(size_t)NC_MAX_ARENA+page,accept_without_reading,NULL,&spare) && errno==EINVAL);
     assert(!large.executable && !large.writable);
     puts("PASS: native alias coherence, bounds, rejection cleanup, uncertain quarantine, write/retry denial (no generated code executed)");
-    puts("PASS: device-sized arena limit, adopted regions (no generated code executed)");
+    puts("PASS: device-sized arena limit, adopted image zero-fill, reserved tail preservation (no generated code executed)");
 }

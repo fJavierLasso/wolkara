@@ -1699,7 +1699,7 @@ bool ng_initialize(const char *path, const char *frameworks, const char *library
         LOG("[native] the arena reserved earlier (%zu bytes) is not used; given back\n",reserved_arena.size);
         nc_destroy(&reserved_arena);
     }
-    bool take_reserved=reserved==NG_RESERVED_TAKE;
+    bool take_reserved=reserved==NG_RESERVED_TAKE, enabler_arena=false;
     startup_begin(signed_backend?"mapping the signed page container":"preparing execution memory",0);
     if (signed_backend)
         arena_ready=signed_image_prepare(guest.base+total,error,sizeof error);
@@ -1708,17 +1708,26 @@ bool ng_initialize(const char *path, const char *frameworks, const char *library
         arena_ready=nc_create_managed(&guest.arena,total,TKPrepareLocalArena,NULL,&local_quarantine);
 #endif
     else if(take_reserved) {
-        guest.arena=reserved_arena; reserved_arena=(NativeCodeMemory){0}; arena_ready=true;
+        guest.arena=reserved_arena; reserved_arena=(NativeCodeMemory){0}; arena_ready=true; enabler_arena=true;
         LOG("[native] using the arena reserved earlier: %zu bytes\n",guest.arena.size);
     }
     else if(external) {
         // An enabler first; otherwise an arena of our own.
-        arena_ready=da_request_arena(&guest.arena,total,guest.log);
+        arena_ready=enabler_arena=da_request_arena(&guest.arena,total,guest.log);
         if(!arena_ready) arena_ready=nc_create_managed(&guest.arena,total,prepare_externally,NULL,&external_quarantine);
     }
     else
         arena_ready=nc_create(&guest.arena,total,publish,NULL);
     if (!arena_ready) { LOG("[native] arena preparation failed errno=%d %s; guest entry blocked\n",errno,signed_backend?error:""); goto done; }
+    if (enabler_arena) {
+        // StikDebug writes a marker into each prepared page. Pages with only
+        // zero-fill have no staged bytes below, so clear the image span first.
+        if (!nc_clear(&guest.arena,total)) {
+            LOG("[native] could not clear the enabler arena errno=%d; guest entry blocked\n",errno);
+            goto done;
+        }
+        LOG("[native] enabler arena cleared for %zu bytes\n",total);
+    }
     // A protection change can be reported and not granted.
     LOG("[native] arena protection %#x\n",hd_protection(guest.arena.executable));
     // Whichever route prepared it: nothing attached, really executable.
