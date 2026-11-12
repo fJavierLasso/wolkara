@@ -726,3 +726,35 @@ memory entitlements in its signature. Installed over the existing Duo app after
 the closed-app guard, preserving data. Launch was refused because the device
 was locked. On-device Game Mode activation and a comparable post-update memory
 sample remain pending; no extra-memory gain is claimed yet.
+
+## Optional Touchbars addon (2026-11-12)
+
+- Launcher Settings → Game tools → Touchbars (experimental) is an opt-in for
+  Forever and Retail. It installs upstream Touchbars 0.7.0 at commit
+  `6ac5bf2e02dba2e2160cf444eef533a4e0118b91` on first enable, verifies the SHA-256
+  of all four install files, and includes the upstream MIT license. No addon
+  Lua or artwork is bundled in this repository or app.
+- The switch reflects the selected edition's managed addon record. Disable and
+  re-enable work offline, retain SavedVariables and do not change Wolkara's
+  native controls. Unmanaged folders and packages containing other addons are
+  not adopted. First install creates AddOns under the shared update lock.
+- `tools/test_touchbars.sh build/touchbars/upstream` passed against separately
+  downloaded original bytes: exact package and license round-trip, tamper and
+  incomplete-download rejection, default off, failed-download recovery, offline
+  toggles, relaunch state, shared-lock rejection, separate editions, preserved
+  pinned copy/layout, and unmanaged/bundled addon protection. Third-party Lua
+  was not executed by these tests.
+- `tools/test_addon_archive.sh` passed (58 archive checks plus the real import,
+  migration, update and rollback lifecycle). `SIMULATOR='iPhone 17'
+  tools/test_wow_launcher_ui.sh` passed, including the new off-by-default switch
+  and its absence for unsupported Classic editions. These use synthetic data.
+- A clean generic Release developer-service build and app-bundle validation
+  passed. Installed over the existing Wolkara bundle on iPhone Duo after a
+  fresh closed-app check; app data was retained and the launcher opened.
+  The device artifact retains pre-existing local diagnostic/audio edits, which
+  are not published as part of this Touchbars change.
+- Touchbars remains off on the device until explicitly enabled. In-game use
+  is not yet verified here. Open `/sptouch` to assign the initially empty
+  buttons; upstream hides normal action bars by default, reversible in
+  More → Default bars. Native controls may overlap its initial positions.
+  Upstream's Retail support has fixture coverage but still awaits live gameplay.

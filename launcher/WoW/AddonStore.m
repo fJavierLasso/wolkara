@@ -455,7 +455,11 @@ BOOL TKAddonProviderIsCurseForge(NSDictionary *provider) {
     // in wolkaraforever/WoW/tests/test_wow_launcher_app.m, which is the coverage the audit asked
     // for; the manifest kept saying the package was owned while its folder was gone.
     NSMutableArray<NSString *> *created=[NSMutableArray new];
-    @try { if (![self prepareMutation:error]) return NO; for(NSString *name in folders)if([NSFileManager.defaultManager fileExistsAtPath:[_directory stringByAppendingPathComponent:name]])return Fail(error,[NSString stringWithFormat:@"%@ already exists; remove or disable the managed package first.",name]);
+    @try { if (![self prepareMutation:error]) return NO;
+        // The launcher can install its first optional addon without opening
+        // Manage addons first. Create the destination only under the write lock.
+        if (![NSFileManager.defaultManager createDirectoryAtPath:_directory withIntermediateDirectories:YES attributes:nil error:error]) return NO;
+        for(NSString *name in folders)if([NSFileManager.defaultManager fileExistsAtPath:[_directory stringByAppendingPathComponent:name]])return Fail(error,[NSString stringWithFormat:@"%@ already exists; remove or disable the managed package first.",name]);
         NSMutableArray *packages=[self mutablePackages];NSString *identifier=folders.firstObject;NSString *toc=TOC([root stringByAppendingPathComponent:identifier]);
         NSMutableDictionary *item = [@{ @"identifier":identifier,@"uuid":NSUUID.UUID.UUIDString,@"name":Value(toc,@"Title:")?:identifier,@"version":Value(toc,@"Version:")?:@"Unknown version",@"source":@"zip",@"archiveSHA256":Digest(archive),@"folders":folders,@"pinned":@NO,@"disabled":@NO,@"tocInterface":interfaces?:@[],@"compatibility":compatibility?:TKAddonCompatibilityUnverified } mutableCopy];
         NSDictionary *clean = CleanProvider(provider);
