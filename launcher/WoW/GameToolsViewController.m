@@ -2,95 +2,37 @@
 #import "AddonManager.h"
 #import "ForeverUI.h"
 #import "UpdateLock.h"
-#import "TouchbarsAddon.h"
 
 @implementation TKGameToolsViewController {
     NSString *_directory, *_product, *_edition, *_version;
     BOOL _busy;
-    TKTouchbarsAddon *_touchbars;
-    BOOL _touchbarsEnabled, _touchbarsCanToggle;
 }
 - (instancetype)initWithWorkingDirectory:(NSString *)directory product:(NSString *)product
                                 edition:(NSString *)edition version:(NSString *)version {
     if ((self=[super initWithStyle:UITableViewStyleInsetGrouped])) {
         _directory=directory.copy; _product=product.copy; _edition=edition.copy; _version=version.copy;
         self.title=@"Game tools";
-        TKAddonStore *store=[[TKAddonStore alloc] initWithAddOnsDirectory:[directory stringByAppendingPathComponent:@"Interface/AddOns"]
-                                                               product:product gameVersion:version];
-        _touchbars=[[TKTouchbarsAddon alloc] initWithStore:store];
-        [self refreshTouchbarsState];
     }
     return self;
 }
-- (void)viewWillAppear:(BOOL)animated {
-    [super viewWillAppear:animated];
-    if (!_busy) { [_touchbars reload]; [self refreshTouchbarsState]; [self.tableView reloadData]; }
-}
-- (void)refreshTouchbarsState {
-    _touchbarsEnabled=_touchbars.enabled;
-    _touchbarsCanToggle=_touchbars.canToggle;
-}
-- (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView {
-    (void)tableView; return [@[@"wowf", @"wow"] containsObject:_product] ? 2 : 1;
-}
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
-    (void)tableView; return section==0 ? 5 : 1;
+    (void)tableView; (void)section; return 5;
 }
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {
-    (void)tableView; return section==0 ? _edition : @"Optional touch addon";
+    (void)tableView; (void)section; return _edition;
 }
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
-    (void)tableView;
-    if (section==1) {
-        if (!_touchbarsCanToggle) return @"An existing Touchbars installation is managed separately. Review it in Manage addons before using this switch.";
-        return @"Downloads Touchbars 0.7.0 by rollarz / Slashplayed contributors (MIT) on first use. Applies at the next game launch. Type /sptouch in WoW to assign, move and resize abilities. Empty buttons are initially hidden; the editor reveals them. Original game bars are hidden by default; restore them in More → Default bars. Wolkara controls stay unchanged. Turning this off keeps your saved layout.";
-    }
+    (void)tableView; (void)section;
     return @"Changes apply only to this edition, while the game is closed. Backups contain WTF and Interface, including settings and addons. Graphics are changed only when you request it.";
 }
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
     (void)tableView;
     UITableViewCell *cell=[[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:nil];
-    if (indexPath.section==1) {
-        cell.textLabel.text=_busy ? @"Please wait…" : @"Touchbars (experimental)";
-        cell.accessibilityIdentifier=@"game.tools.touchbars";
-        cell.selectionStyle=UITableViewCellSelectionStyleNone;
-        UISwitch *toggle=[UISwitch new];
-        toggle.accessibilityIdentifier=@"game.tools.touchbars.toggle";
-        toggle.accessibilityLabel=@"Touchbars addon";
-        toggle.on=_touchbarsEnabled; toggle.enabled=!_busy && _touchbarsCanToggle;
-        [toggle addTarget:self action:@selector(toggleTouchbars:) forControlEvents:UIControlEventValueChanged];
-        cell.accessoryView=toggle;
-        return cell;
-    }
     cell.textLabel.text=@[@"Manage addons", @"Back up settings and addons", @"Restore latest backup", @"Enable gamepad", @"Reset graphics settings"][indexPath.row];
     cell.accessibilityIdentifier=[NSString stringWithFormat:@"game.tools.%ld",(long)indexPath.row];
     cell.textLabel.enabled=!_busy;
     if (indexPath.row==0) cell.accessoryType=UITableViewCellAccessoryDisclosureIndicator;
     return cell;
-}
-- (void)setOperationBusy:(BOOL)busy {
-    // Cache model state only after the worker finishes; UIKit may ask for
-    // cells during rotation while the install is still mutating the store.
-    if (!busy) [self refreshTouchbarsState];
-    _busy=busy; self.navigationItem.hidesBackButton=busy; self.modalInPresentation=busy;
-    self.navigationController.interactivePopGestureRecognizer.enabled=!busy;
-    [self.tableView reloadData];
-}
-- (void)toggleTouchbars:(UISwitch *)toggle {
-    if (_busy) return;
-    BOOL enabled=toggle.on;
-    [self setOperationBusy:YES];
-    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED,0),^{
-        NSError *error=nil;
-        BOOL success=[self->_touchbars setEnabled:enabled error:&error];
-        [self->_touchbars reload];
-        dispatch_async(dispatch_get_main_queue(),^{
-            [self setOperationBusy:NO];
-            [self showResult:success ? (enabled ? @"Touchbars is ready for the next game launch. Type /sptouch to open its editor and assign abilities. If it does not appear, enable SPTouchBars in WoW's AddOns list."
-                                                : @"Touchbars is off for the next game launch. Your saved layout is retained.")
-                                     : error.localizedDescription ?: @"Touchbars could not be changed. Try again."];
-        });
-    });
 }
 - (void)showResult:(NSString *)message {
     UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"Game tools" message:message preferredStyle:UIAlertControllerStyleAlert];
@@ -99,7 +41,9 @@
 }
 - (void)performOperation:(NSInteger)operation {
     if (_busy) return;
-    [self setOperationBusy:YES];
+    _busy=YES; self.navigationItem.hidesBackButton=YES; self.modalInPresentation=YES;
+    self.navigationController.interactivePopGestureRecognizer.enabled=NO;
+    [self.tableView reloadData];
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED,0),^{
         NSError *error=nil; NSString *message=nil;
         int lock=TKWoWAcquireUpdateLock(self->_directory.stringByDeletingLastPathComponent,&error);
@@ -120,16 +64,17 @@
                 }
             } @finally { TKWoWReleaseUpdateLock(lock); }
         }
-        [self->_touchbars reload];
         dispatch_async(dispatch_get_main_queue(),^{
-            [self setOperationBusy:NO];
+            self->_busy=NO; self.navigationItem.hidesBackButton=NO; self.modalInPresentation=NO;
+            self.navigationController.interactivePopGestureRecognizer.enabled=YES;
+            [self.tableView reloadData];
             [self showResult:error.localizedDescription ?: message ?: @"The operation could not finish."];
         });
     });
 }
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
-    if (_busy || indexPath.section!=0) return;
+    if (_busy) return;
     NSInteger operation=indexPath.row;
     if (!operation) {
         NSString *addons=[_directory stringByAppendingPathComponent:@"Interface/AddOns"];

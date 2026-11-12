@@ -758,3 +758,31 @@ sample remain pending; no extra-memory gain is claimed yet.
   buttons; upstream hides normal action bars by default, reversible in
   More → Default bars. Native controls may overlap its initial positions.
   Upstream's Retail support has fixture coverage but still awaits live gameplay.
+
+## Touchbars experiment removed (2026-11-12)
+
+- Removed the optional toggle, downloader, archive builder and Touchbars-only
+  tests/documentation after the user found the addon too complex in practice.
+  Game tools returns to its original five actions; native controls and layouts
+  are unchanged.
+- A one-time launcher cleanup retires only an exact, managed `SPTouchBars`
+  package before game entry, including a previously disabled copy. It disables
+  the package first, then uses the addon store's removal path to keep a recovery
+  copy outside AddOns. SavedVariables and other addons are preserved. Unmanaged
+  folders and mixed-addon bundles are not changed; a later deliberate reinstall
+  is respected. The cleanup runs after UI restore recovery, outside the outer
+  update lock because the store locks its own operations.
+- Focused native cleanup tests passed with AddressSanitizer/UndefinedBehaviorSanitizer:
+  active/disabled copies, exact backup bytes, saved layout, update-lock rejection,
+  unmanaged/bundled isolation and one-time behavior. The existing legacy cleanup
+  and symlink checks also pass. The iPhone 17 launcher fixture passed, including
+  the original single-section/five-action Game tools screen.
+- A clean generic Release developer-service build and app-bundle validation
+  passed. The device's addon manifest confirmed one active managed Touchbars
+  0.7.0 package before replacement.
+- Installed over the same Wolkara bundle after a fresh closed-app check and
+  opened the launcher. Device verification confirmed the retirement receipt,
+  no SPTouchBars folder in active AddOns, no Touchbars package in the manifest,
+  and byte-for-byte-equivalent records for all other managed addons.
+  The device artifact retains the pre-existing local diagnostic/audio edits;
+  those unchanged edits are excluded from this removal commit.

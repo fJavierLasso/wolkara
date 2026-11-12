@@ -8,8 +8,6 @@ NS_ASSUME_NONNULL_BEGIN
 - (void)cancel;
 @property(nonatomic, readonly) BOOL cancelled;
 @property(nonatomic, copy, nullable) void (^progress)(NSString *phase, uint64_t done, uint64_t total);
-// Bounded HTTPS data, without redirects, cookies or credentials. Worker queue only.
-- (nullable NSData *)fetch:(NSURL *)url limit:(NSUInteger)limit error:(NSError **)error;
 - (nullable NSData *)configuration:(NSString *)key cdn:(NSString *)cdn error:(NSError **)error;
 - (nullable NSData *)manifest:(NSString *)name config:(NSDictionary *)config cdn:(NSString *)cdn error:(NSError **)error;
 - (nullable NSData *)encodingForPlan:(NSDictionary *)plan directory:(NSString *)directory error:(NSError **)error;

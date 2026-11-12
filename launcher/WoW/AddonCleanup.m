@@ -1,4 +1,6 @@
 #import "AddonCleanup.h"
+#import "AddonStore.h"
+#import "UpdateLock.h"
 #include <sys/stat.h>
 #include <errno.h>
 #include <stdlib.h>
@@ -58,4 +60,37 @@ BOOL TKWoWRetireTouchAddon(NSString *editionDirectory, NSError **error) {
     [NSUserDefaults.standardUserDefaults removeObjectForKey:@"WolkaraMobileEnabled"];
     [NSUserDefaults.standardUserDefaults removeObjectForKey:@"WolkaraMobileAvailable"];
     return YES;
+}
+
+BOOL TKWoWRetireManagedTouchbars(NSString *editionDirectory, NSString *product,
+                               NSString *version, NSError **error) {
+    NSString *receipt=[editionDirectory stringByAppendingPathComponent:@".wolkara-retired-touchbars-v1"];
+    struct stat info;
+    if (!lstat(receipt.fileSystemRepresentation,&info)) {
+        return S_ISREG(info.st_mode) ? YES : Fail(error);
+    }
+    if (errno!=ENOENT) return Fail(error);
+    // The preceding legacy cleanup validates the edition/Interface/AddOns
+    // paths. Only a single, explicitly managed package may be retired here.
+    NSString *addons=[editionDirectory stringByAppendingPathComponent:@"Interface/AddOns"];
+    TKAddonStore *store=[[TKAddonStore alloc] initWithAddOnsDirectory:addons product:product gameVersion:version];
+    for (__strong TKAddonRecord *record in store.records) {
+        if (!record.managed || ![record.folders isEqualToArray:@[@"SPTouchBars"]]) continue;
+        // Disable first: even if removal of the ownership record later fails,
+        // the addon cannot run or continue hiding the original action bars.
+        if (!record.disabled && [NSFileManager.defaultManager fileExistsAtPath:[addons stringByAppendingPathComponent:@"SPTouchBars"]]) {
+            if (![store setDisabled:YES record:record error:error]) return NO;
+            for (TKAddonRecord *current in store.records) {
+                if ([current.uuid isEqual:record.uuid]) { record=current; break; }
+            }
+        }
+        if (![store removeRecord:record error:error]) return NO;
+    }
+    // Do not keep removing a deliberate manual reinstall on future launches.
+    // This receipt lives with the edition, so app upgrades keep it in place.
+    int lock=TKWoWAcquireUpdateLock(editionDirectory.stringByDeletingLastPathComponent,error);
+    if (lock<0) return NO;
+    @try {
+        return [[NSData data] writeToFile:receipt options:NSDataWritingAtomic error:error];
+    } @finally { TKWoWReleaseUpdateLock(lock); }
 }

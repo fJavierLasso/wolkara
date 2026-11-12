@@ -1,6 +1,66 @@
 #import <Foundation/Foundation.h>
 #import "../launcher/WoW/AddonCleanup.h"
+#import "../launcher/WoW/AddonStore.h"
+#import "../launcher/WoW/UpdateLock.h"
 #include <assert.h>
+
+static void TestManagedTouchbarsRemoval(NSString *parent) {
+    NSFileManager *fm=NSFileManager.defaultManager;
+    NSData *bytes=[@"synthetic addon and saved-layout sentinel" dataUsingEncoding:NSUTF8StringEncoding];
+    for (NSString *scenario in @[@"active", @"disabled", @"unmanaged", @"bundle"]) {
+        NSString *root=[parent stringByAppendingPathComponent:scenario];
+        NSString *addons=[root stringByAppendingPathComponent:@"Interface/AddOns"];
+        assert([fm createDirectoryAtPath:addons withIntermediateDirectories:YES attributes:nil error:NULL]);
+        TKAddonStore *store=[[TKAddonStore alloc] initWithAddOnsDirectory:addons product:@"wowf" gameVersion:@"1.60.1"];
+        NSString *support=[store valueForKey:@"support"];
+        BOOL disabled=[scenario isEqual:@"disabled"];
+        BOOL managed=![scenario isEqual:@"unmanaged"];
+        BOOL bundle=[scenario isEqual:@"bundle"];
+        NSString *base=disabled ? [support stringByAppendingPathComponent:@"disabled/SPTouchBars"] : addons;
+        NSString *folder=[base stringByAppendingPathComponent:@"SPTouchBars"];
+        assert([fm createDirectoryAtPath:folder withIntermediateDirectories:YES attributes:nil error:NULL]);
+        assert([bytes writeToFile:[folder stringByAppendingPathComponent:@"SPTouchBars.toc"] atomically:YES]);
+        NSString *other=[addons stringByAppendingPathComponent:@"OtherAddon"];
+        assert([fm createDirectoryAtPath:other withIntermediateDirectories:NO attributes:nil error:NULL]);
+        assert([bytes writeToFile:[other stringByAppendingPathComponent:@"OtherAddon.toc"] atomically:YES]);
+        NSString *saved=[root stringByAppendingPathComponent:@"WTF/SPTouchBars.lua"];
+        assert([fm createDirectoryAtPath:saved.stringByDeletingLastPathComponent withIntermediateDirectories:YES attributes:nil error:NULL]);
+        assert([bytes writeToFile:saved atomically:YES]);
+        NSDictionary *package=@{@"identifier":@"SPTouchBars", @"uuid":NSUUID.UUID.UUIDString,
+            @"name":@"SPTouchBars", @"version":@"0.7.0", @"source":@"zip", @"archiveSHA256":@"fixture",
+            @"folders":bundle ? @[@"SPTouchBars",@"OtherAddon"] : @[@"SPTouchBars"],
+            @"disabled":@(disabled), @"pinned":@YES};
+        NSString *manifest=[addons stringByAppendingPathComponent:@".wolkaraforever-addons.json"];
+        NSData *data=[NSJSONSerialization dataWithJSONObject:@{@"format":@2,@"revision":@1,@"packages":managed ? @[package] : @[]} options:0 error:NULL];
+        assert([data writeToFile:manifest atomically:YES]);
+        NSError *error=nil;
+        assert(TKWoWRetireTouchAddon(root,&error));
+        int lock=TKWoWAcquireUpdateLock(root.stringByDeletingLastPathComponent,&error); assert(lock>=0);
+        assert(!TKWoWRetireManagedTouchbars(root,@"wowf",@"1.60.1",&error));
+        assert([fm fileExistsAtPath:folder]);
+        TKWoWReleaseUpdateLock(lock); error=nil;
+        assert(TKWoWRetireManagedTouchbars(root,@"wowf",@"1.60.1",&error) && !error);
+        assert([fm fileExistsAtPath:folder]==(!managed || bundle));
+        assert([[NSData dataWithContentsOfFile:saved] isEqual:bytes]);
+        assert([[NSData dataWithContentsOfFile:[other stringByAppendingPathComponent:@"OtherAddon.toc"]] isEqual:bytes]);
+        if (managed && !bundle) {
+            [store reload]; assert(store.records.count==1 && !store.records.firstObject.managed);
+            NSString *previous=[support stringByAppendingPathComponent:@"previous"];
+            NSArray *copies=[fm contentsOfDirectoryAtPath:previous error:NULL]; assert(copies.count==1);
+            NSString *copy=[[previous stringByAppendingPathComponent:copies[0]] stringByAppendingPathComponent:@"SPTouchBars/SPTouchBars.toc"];
+            assert([[NSData dataWithContentsOfFile:copy] isEqual:bytes]);
+        }
+        assert(TKWoWRetireManagedTouchbars(root,@"wowf",@"1.60.1",&error));
+        // Reinstalling explicitly later is respected, even if managed again.
+        if (managed && !bundle) {
+            assert([fm createDirectoryAtPath:folder withIntermediateDirectories:YES attributes:nil error:NULL]);
+            assert([bytes writeToFile:[folder stringByAppendingPathComponent:@"SPTouchBars.toc"] atomically:YES]);
+            assert([data writeToFile:manifest atomically:YES]);
+            assert(TKWoWRetireManagedTouchbars(root,@"wowf",@"1.60.1",&error) && [fm fileExistsAtPath:folder]);
+        }
+        [fm removeItemAtPath:support error:NULL];
+    }
+}
 
 int main(void) { @autoreleasepool {
     NSFileManager *fm = NSFileManager.defaultManager;
@@ -75,6 +135,7 @@ int main(void) { @autoreleasepool {
     assert([fm removeItemAtPath:disabled error:NULL]);
     assert([fm createSymbolicLinkAtPath:disabled withDestinationPath:root error:NULL]);
     assert(!TKWoWRetireTouchAddon(root,&error) && [fm fileExistsAtPath:source]);
+    TestManagedTouchbarsRemoval([root stringByAppendingPathComponent:@"ManagedFixtures"]);
     assert([fm removeItemAtPath:root error:NULL]);
-    puts("Addon cleanup PASS: retirement, exact content preservation, isolation, repeat and symlink rejection.");
+    puts("Addon cleanup PASS: legacy and managed Touchbars retirement, saved layout and backup preservation, shared lock, unmanaged/bundled isolation, one-time removal and symlink rejection.");
 } return 0; }

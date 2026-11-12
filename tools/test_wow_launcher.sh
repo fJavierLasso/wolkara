@@ -28,8 +28,9 @@ xcrun clang -fobjc-arc -Wall -Wextra -Werror -O1 -g \
     -o build/wow-launcher/test_wow_verification
 build/wow-launcher/test_wow_verification
 xcrun clang -fobjc-arc -Wall -Wextra -Werror -O1 -g \
-    -fsanitize=address,undefined -fno-omit-frame-pointer -framework Foundation \
-    launcher/WoW/AddonCleanup.m tests/test_wow_addon_cleanup.m -o build/wow-launcher/test_wow_addon_cleanup
+    -fsanitize=address,undefined -fno-omit-frame-pointer -Wno-deprecated-declarations -framework Foundation \
+    launcher/WoW/AddonCleanup.m launcher/WoW/AddonStore.m launcher/WoW/UpdateLock.m launcher/App/WKLocalization.m \
+    tests/test_wow_addon_cleanup.m -o build/wow-launcher/test_wow_addon_cleanup
 build/wow-launcher/test_wow_addon_cleanup
 xcrun clang -fobjc-arc -Wall -Wextra -Werror -O2 -framework Foundation -lz \
     launcher/WoW/Manifest.m launcher/WoW/CASC.m launcher/WoW/Client.m tools/wow_cdn.m \

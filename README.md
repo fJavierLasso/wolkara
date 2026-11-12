@@ -23,10 +23,6 @@ adapted to Wolkara's edition selection and shared update lock, with interrupted-
 recovery fixes. Wolkara's website download flow replaces the API browser and credential setup.
 The imported MIT [license](WolkaraForever-LICENSE) is retained and shipped in the app.
 
-The optional [Touchbars](https://github.com/rollarz/Touchbars) addon is by
-**rollarz / Slashplayed contributors**, copyright **Straw Dynamics**, under MIT.
-It is downloaded unchanged on request, with its license, rather than bundled.
-
 This project is not affiliated with or endorsed by Blizzard Entertainment.
 
 ## Try it with Xcode
@@ -114,22 +110,6 @@ WoW gameplay under this capability set remain untested.
   while downloading. Installation uses the shared game-update lock.
 - Settings → Game tools also provides the addon manager, WTF + Interface backups,
   gamepad settings and graphics reset. Tools follow the selected edition.
-- **Settings → Game tools → Touchbars (experimental)** optionally installs
-  Touchbars 0.7.0 for Forever or Retail, off by default. Enable it before launching
-  WoW, then type **`/sptouch`** to open the editor. Drag spells, items or macros
-  onto its initially empty buttons; move and resize them there. It offers up to
-  12 spell buttons, 12 utility slots, two sets and Shift/Alt/Ctrl layers.
-  Original game action bars are hidden by default; **More → Default bars: shown**
-  restores them. Wolkara's own controls and layouts stay unchanged.
-  Turning the switch off removes the addon from the game's active folder for the
-  next launch, keeping its saved per-character layout and an offline copy.
-  First enable downloads the four install files from pinned upstream commit
-  [`6ac5bf2`](https://github.com/rollarz/Touchbars/commit/6ac5bf2e02dba2e2160cf444eef533a4e0118b91),
-  verifies SHA-256 and installs through the addon manager. Existing unmanaged
-  folders or packages containing other addons are left for Manage addons.
-  An existing managed copy is reused without automatic upgrades or downgrades.
-  If disabled inside WoW, enable **SPTouchBars** in its AddOns list as well.
-  Retail gameplay remains unverified upstream; device gameplay also needs testing.
 - Release builds and optimized adapters, shader cache hits without a full byte copy,
   optional expensive diagnostics and a pause of GPU submissions while inactive.
   Pending rendering and texture uploads resume when the app becomes active;

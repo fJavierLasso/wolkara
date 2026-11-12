@@ -293,6 +293,7 @@ static UIStackView *Stack(NSArray<UIView *> *views, CGFloat spacing) {
                         }
                     } @finally { TKWoWReleaseUpdateLock(lock); }
                 }
+                if (!error) TKWoWRetireManagedTouchbars(directory,product[@"id"],installation.installedVersion ?: @"",&error);
             }
         }
         dispatch_async(dispatch_get_main_queue(),^{

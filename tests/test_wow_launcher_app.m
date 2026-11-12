@@ -321,14 +321,7 @@ static void TestAddonBrowserPolicy(void) {
     UINavigationController *toolNavigation=[[UINavigationController alloc] initWithRootViewController:tools];
     [toolNavigation loadViewIfNeeded]; [tools loadViewIfNeeded];
     assert([tools.tableView numberOfRowsInSection:0]==5);
-    assert([tools.tableView numberOfSections]==2);
-    UITableViewCell *touchbars=[tools tableView:tools.tableView cellForRowAtIndexPath:[NSIndexPath indexPathForRow:0 inSection:1]];
-    assert([touchbars.accessoryView isKindOfClass:UISwitch.class]);
-    assert(![(UISwitch *)touchbars.accessoryView isOn] && touchbars.accessoryView.userInteractionEnabled);
-    assert([[tools tableView:tools.tableView titleForFooterInSection:1] containsString:@"/sptouch"]);
-    TKGameToolsViewController *classicTools=[[TKGameToolsViewController alloc] initWithWorkingDirectory:fixture.directory
-        product:@"wow_classic" edition:@"Classic" version:@"5.5.0"];
-    assert([classicTools numberOfSectionsInTableView:classicTools.tableView]==1);
+    assert([tools.tableView numberOfSections]==1);
     [tools tableView:tools.tableView didSelectRowAtIndexPath:[NSIndexPath indexPathForRow:0 inSection:0]];
     TKWoWAddonManagerViewController *addons=(id)toolNavigation.topViewController;
     assert([addons isKindOfClass:TKWoWAddonManagerViewController.class]);
