@@ -28,6 +28,9 @@ preferences isolation/cleanup, expiration and consumed/cancelled handoffs.
 The iPhone 17 UIKit fixture passed with main-frame-only browser callbacks,
 cancellation/duplicate-callback protection and the existing normal launch flow.
 The Release iOS build and app-bundle/signature checks passed.
+That build (`3d4ab41`) was installed over the existing app on the Duo via Wi-Fi;
+the device installation and process-launch commands both succeeded. No game
+files were moved, and no uninstall was performed.
 
 **No real Battle.net account login through this route has been validated on the
 Duo yet.** A browser ticket does not prove game authentication. The recent
