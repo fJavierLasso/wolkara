@@ -71,6 +71,12 @@ installation and launch both succeeded; game data was preserved. Provider
 sign-in, cross-launch account reuse and key visibility during a real game still
 await the user's test.
 
+After this installation, the user reported an update-check timeout following
+an app restart, then confirmed normal operation again (2026-11-17). No further
+code change was installed between the failure and recovery. The timeout's
+cause remains undetermined; this recovery alone does not separately validate
+external-provider login or cross-launch ticket reuse.
+
 ## Startup fixes for issues #13 and #21 (2026-11-16)
 
 The launcher now writes the complete supported CDN hosts/server metadata on
