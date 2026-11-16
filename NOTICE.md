@@ -101,12 +101,13 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
-## Battle.net browser login experiment
+## Battle.net browser login
 
 The web-login and native macOS handoff in `launcher/WoW/BattleNetLogin.m` and
 `launcher/WoW/BattleNetBrowser.m` were adapted from Waypoint's
-`Sources/WaypointCore/LaunchOptions.swift`, `Sources/Waypoint/WebLogin.swift` and
-documented login flow, revision `a9aa570adc4afcc36420314bb6bc33d24caf8b49`:
+`Sources/WaypointCore/LaunchOptions.swift`, `Sources/Waypoint/WebLogin.swift`,
+`Sources/WaypointCore/BrowserLoginReturn.swift`,
+`Sources/Waypoint/BrowserReturnSheet.swift` and documented login flow, revision `a9aa570adc4afcc36420314bb6bc33d24caf8b49`:
 https://github.com/wowlocal/waypoint-launcher. The synthetic cipher test vector
 also comes from its `Tests/WaypointCoreTests/LaunchTests.swift`.
 

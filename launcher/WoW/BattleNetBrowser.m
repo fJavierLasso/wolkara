@@ -13,17 +13,24 @@
     WKNavigation *_mainNavigation;
     BOOL _nextNavigationTrusted, _mainNavigationTrusted, _rejectedCallback;
     UILabel *_host;
+    UIStackView *_stack;
+    UITextField *_returnField;
+    UIScrollView *_returnScroll;
+    BOOL _externalLoginActive;
 }
 - (instancetype)initWithRegion:(NSString *)region completion:(void (^)(NSString *,NSString *))completion {
     if (!(self=[super initWithNibName:nil bundle:nil])) return nil;
     _loginURL=TKWoWLoginURL(region); _completion=[completion copy];
-    self.title=@"Battle.net login · Experimental"; self.modalInPresentation=YES;
+    self.title=@"Battle.net login"; self.modalInPresentation=YES;
     return self;
 }
 - (void)viewDidLoad {
     [super viewDidLoad];
     self.view.backgroundColor=UIColor.systemBackgroundColor;
     self.navigationItem.leftBarButtonItem=[[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemCancel target:self action:@selector(cancel)];
+    self.navigationItem.rightBarButtonItem=[[UIBarButtonItem alloc] initWithTitle:@"Apple / Google…"
+        style:UIBarButtonItemStylePlain target:self action:@selector(showExternalLogin)];
+    self.navigationItem.rightBarButtonItem.accessibilityIdentifier=@"wow.login.external";
     _host=[UILabel new]; _host.font=[UIFont preferredFontForTextStyle:UIFontTextStyleFootnote];
     _host.textAlignment=NSTextAlignmentCenter; _host.numberOfLines=0;
     _host.text=@"Sign in on Blizzard's website. Complete any CAPTCHA or verification there.";
@@ -35,6 +42,7 @@
     _web.scrollView.backgroundColor=_web.backgroundColor;
     UIStackView *stack=[[UIStackView alloc] initWithArrangedSubviews:@[_host,_web]];
     stack.axis=UILayoutConstraintAxisVertical; stack.spacing=8; stack.translatesAutoresizingMaskIntoConstraints=NO;
+    _stack=stack;
     [self.view addSubview:stack];
     [NSLayoutConstraint activateConstraints:@[
         [stack.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor],
@@ -49,11 +57,85 @@
     else [self finish:nil failure:@"Browser login is unavailable for this region."];
 }
 - (void)cancel { [self finish:nil failure:nil]; }
+- (void)showExternalLogin {
+    if (_finished || _externalLoginActive) return;
+    _externalLoginActive=YES;
+    _web.navigationDelegate=nil; _web.UIDelegate=nil; [_web stopLoading];
+    [_stack removeArrangedSubview:_web]; [_web removeFromSuperview]; _web=nil;
+    self.navigationItem.rightBarButtonItem=nil;
+    _host.text=@"Sign in with Apple, Google or another linked account in your browser. After signing in, the final localhost page cannot open. Copy its full address, return here and paste it below. Keep that address private: it grants access to your account.";
+    _stack.layoutMargins=UIEdgeInsetsMake(16,20,16,20); _stack.layoutMarginsRelativeArrangement=YES;
+    UIButton *open=[UIButton buttonWithType:UIButtonTypeSystem];
+    [open setTitle:@"Open browser to sign in" forState:UIControlStateNormal];
+    open.accessibilityIdentifier=@"wow.login.openBrowser";
+    [open addTarget:self action:@selector(openExternalBrowser) forControlEvents:UIControlEventTouchUpInside];
+    _returnField=[UITextField new]; _returnField.secureTextEntry=YES;
+    _returnField.borderStyle=UITextBorderStyleRoundedRect;
+    _returnField.placeholder=@"Paste the final browser address";
+    _returnField.accessibilityIdentifier=@"wow.login.browserReturn";
+    _returnField.accessibilityLabel=@"Private address from the browser";
+    _returnField.autocorrectionType=UITextAutocorrectionTypeNo;
+    _returnField.spellCheckingType=UITextSpellCheckingTypeNo;
+    _returnField.autocapitalizationType=UITextAutocapitalizationTypeNone;
+    _returnField.smartQuotesType=UITextSmartQuotesTypeNo;
+    _returnField.smartDashesType=UITextSmartDashesTypeNo;
+    _returnField.keyboardType=UIKeyboardTypeURL;
+    UIButton *use=[UIButton buttonWithType:UIButtonTypeSystem];
+    [use setTitle:@"Continue" forState:UIControlStateNormal];
+    use.accessibilityIdentifier=@"wow.login.useBrowserReturn";
+    [use addTarget:self action:@selector(useBrowserReturn) forControlEvents:UIControlEventTouchUpInside];
+    [_stack addArrangedSubview:open]; [_stack addArrangedSubview:_returnField];
+    [_stack addArrangedSubview:use];
+    // Keep the private return field reachable on narrow landscape phones and
+    // when the keyboard appears. Removing the old stack releases its web constraints.
+    [_stack removeFromSuperview];
+    _returnScroll=[UIScrollView new]; _returnScroll.translatesAutoresizingMaskIntoConstraints=NO;
+    [self.view addSubview:_returnScroll]; [_returnScroll addSubview:_stack];
+    [NSLayoutConstraint activateConstraints:@[
+        [_returnScroll.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor],
+        [_returnScroll.bottomAnchor constraintEqualToAnchor:self.view.keyboardLayoutGuide.topAnchor],
+        [_returnScroll.leadingAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.leadingAnchor],
+        [_returnScroll.trailingAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.trailingAnchor],
+        [_stack.topAnchor constraintEqualToAnchor:_returnScroll.contentLayoutGuide.topAnchor],
+        [_stack.bottomAnchor constraintEqualToAnchor:_returnScroll.contentLayoutGuide.bottomAnchor],
+        [_stack.leadingAnchor constraintEqualToAnchor:_returnScroll.contentLayoutGuide.leadingAnchor],
+        [_stack.trailingAnchor constraintEqualToAnchor:_returnScroll.contentLayoutGuide.trailingAnchor],
+        [_stack.widthAnchor constraintEqualToAnchor:_returnScroll.frameLayoutGuide.widthAnchor],
+        [_returnField.heightAnchor constraintGreaterThanOrEqualToConstant:44],
+        [open.heightAnchor constraintGreaterThanOrEqualToConstant:44],
+        [use.heightAnchor constraintGreaterThanOrEqualToConstant:44]]];
+}
+- (void)viewDidLayoutSubviews {
+    [super viewDidLayoutSubviews];
+    if (_externalLoginActive && _returnField.isFirstResponder)
+        [_returnScroll scrollRectToVisible:[_returnField convertRect:_returnField.bounds toView:_returnScroll] animated:NO];
+}
+- (void)openExternalBrowser {
+    if (_finished || !_externalLoginActive || !_loginURL) return;
+    [_returnField resignFirstResponder];
+    __weak typeof(self) weakSelf=self;
+    [UIApplication.sharedApplication openURL:_loginURL options:@{} completionHandler:^(BOOL success) {
+        TKWoWBattleNetBrowser *host=weakSelf;
+        if (host && !success && !host->_finished) host->_host.text=@"The browser could not open. Try again or cancel to use Battle.net email login.";
+    }];
+}
+- (void)useBrowserReturn {
+    if (_finished || !_externalLoginActive) return;
+    // Explicit user paste only. Never read the pasteboard, Safari storage or
+    // provider forms. The game service, not this parser, authenticates the ticket.
+    NSString *text=[_returnField.text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    NSString *ticket=text.length<=8192?TKWoWLoginTicketFromURL([NSURL URLWithString:text]):nil;
+    _returnField.text=@"";
+    if (!ticket) { _host.text=@"Paste the complete final address from your browser. It must start with http://localhost:0/?ST=."; return; }
+    [_returnField resignFirstResponder];
+    [self finish:ticket failure:nil];
+}
 - (void)finish:(NSString *)ticket failure:(NSString *)failure {
     if (_finished) return; _finished=YES;
     [_timeout invalidate]; _timeout=nil;
     _web.navigationDelegate=nil; _web.UIDelegate=nil; [_web stopLoading];
     [_web removeFromSuperview]; _web=nil;
+    _returnField.text=@"";
     void (^completion)(NSString *,NSString *)=_completion; _completion=nil;
     // The caller encrypts immediately, before dismissal can retain the ticket.
     if (completion) completion(ticket,failure);
@@ -79,7 +161,7 @@
 - (void)webView:(WKWebView *)webView decidePolicyForNavigationAction:(WKNavigationAction *)action
     decisionHandler:(void (^)(WKNavigationActionPolicy))decisionHandler {
     (void)webView; NSURL *url=action.request.URL;
-    if (_finished) { decisionHandler(WKNavigationActionPolicyCancel); return; }
+    if (_finished || _externalLoginActive) { decisionHandler(WKNavigationActionPolicyCancel); return; }
     if (TKWoWLoginCallbackURL(url)) {
         // Only the top-level login navigation can finish an attempt. A CAPTCHA
         // iframe or popup must never inject a different account's ticket.
@@ -93,7 +175,7 @@
         if (!TKWoWLoginPageIsTrusted(url)) {
             _nextNavigationTrusted=NO;
             decisionHandler(WKNavigationActionPolicyCancel);
-            _host.text=@"Use your Battle.net email login here. External sign-in providers are not supported yet.";
+            [self showExternalLogin];
             return;
         }
         if (action.targetFrame.isMainFrame) _nextNavigationTrusted=YES;
@@ -149,7 +231,7 @@
 - (WKWebView *)webView:(WKWebView *)webView createWebViewWithConfiguration:(WKWebViewConfiguration *)configuration
     forNavigationAction:(WKNavigationAction *)action windowFeatures:(WKWindowFeatures *)features {
     (void)configuration; (void)features;
-    if (!_finished && !action.targetFrame && TKWoWLoginPageIsTrusted(action.request.URL)) [webView loadRequest:action.request];
+    if (!_finished && !_externalLoginActive && !action.targetFrame && TKWoWLoginPageIsTrusted(action.request.URL)) [webView loadRequest:action.request];
     return nil;
 }
 @end

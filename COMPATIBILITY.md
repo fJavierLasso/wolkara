@@ -32,11 +32,9 @@ That build (`3d4ab41`) was installed over the existing app on the Duo via Wi-Fi;
 the device installation and process-launch commands both succeeded. No game
 files were moved, and no uninstall was performed.
 
-**No real Battle.net account login through this route has been validated on the
-Duo yet.** A browser ticket does not prove game authentication. The recent
-manual-login log reported status 14400 after a CAPTCHA submission; it did not
-prove the password shortcut caused the failure. See
-[the experiment and current limits](docs/BATTLE_NET_LOGIN.md).
+The recent manual-login log reported status 14400 after a CAPTCHA submission;
+it did not prove the password shortcut caused the failure. See
+[login and current limits](docs/BATTLE_NET_LOGIN.md).
 
 The first device attempts reached the website login but the user reported
 "The Battle.net login page could not load" after completing authentication.
@@ -51,9 +49,22 @@ The updated UIKit fixture passes the synthetic redirect/error cases (both URL
 and string fields), duplicate delivery, rejected origins and secret-free failure
 messages. Release compilation and bundle/signature checks pass. The corrected
 app was installed and opened on the Duo over Wi-Fi after confirming it was
-closed. The user's repeat login test remains pending; the missing handler is
-confirmed in our code, but no real callback or successful game login has yet
-been observed.
+closed. The user subsequently confirmed the login works on the Duo (2026-11-17).
+A reported crash when focusing the web username field stopped recurring without
+an additional code change; its cause has not been established.
+
+The current update moves the login selector above Play, saves region-scoped
+tickets in a device-only app-private Keychain group and hides the key shortcut
+only for a prepared Battle.net game session. Apple/Google have an external
+browser + explicit private return-address paste route, not an automatic Safari
+callback. Real provider login and ticket reuse across launches remain unverified.
+The original email-login confirmation does not validate these additions. Synthetic
+ASan/UBSan host tests and UIKit selector/return tests pass, including actual
+isolated simulator Keychain add/reload/update/delete with device-only attributes.
+The key-toolbar fixture passes hiding, stale action rejection, and preservation
+of text/position; its separate older saved-password Keychain probe remains
+unavailable in that ad-hoc fixture. Release compilation, bundle/signature checks
+and app-only Keychain entitlement separation from the tunnel pass.
 
 ## Startup fixes for issues #13 and #21 (2026-11-16)
 

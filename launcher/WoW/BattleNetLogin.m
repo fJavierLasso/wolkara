@@ -8,7 +8,7 @@ static NSError *LoginError(NSString *message) {
     return [NSError errorWithDomain:@"Wolkara.BattleNetLogin" code:1
         userInfo:@{NSLocalizedDescriptionKey:message}];
 }
-static BOOL TicketValid(NSString *ticket) {
+BOOL TKWoWLoginTicketIsValid(NSString *ticket) {
     if (![ticket isKindOfClass:NSString.class] || ticket.length>128) return NO;
     NSArray<NSString *> *parts=[ticket componentsSeparatedByString:@"-"];
     if (parts.count!=3 || ![@[@"US",@"EU",@"KR",@"CN",@"TW"] containsObject:parts[0]] ||
@@ -41,10 +41,10 @@ NSString *TKWoWLoginTicketFromURL(NSURL *url) {
     NSURLComponents *c=[NSURLComponents componentsWithURL:url resolvingAgainstBaseURL:NO];
     NSString *ticket=nil; NSUInteger count=0;
     for (NSURLQueryItem *item in c.queryItems) if ([item.name isEqual:@"ST"]) { count++; ticket=item.value; }
-    return count==1 && TicketValid(ticket)?ticket:nil;
+    return count==1 && TKWoWLoginTicketIsValid(ticket)?ticket:nil;
 }
 NSData *TKWoWEncryptLoginTicket(NSString *ticket, NSString *userName, NSError **error) {
-    if (!TicketValid(ticket) || !userName.length) {
+    if (!TKWoWLoginTicketIsValid(ticket) || !userName.length) {
         if (error) *error=LoginError(@"Battle.net returned an unsupported login ticket."); return nil;
     }
     // Waypoint LaunchOptions.swift, 0BSD: RegistryDarwin's wire format.

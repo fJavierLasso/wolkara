@@ -9,6 +9,7 @@
 #import "UpdateLock.h"
 #import "BattleNetLogin.h"
 #import "BattleNetBrowser.h"
+#import "BattleNetSessionStore.h"
 #import "../App/LaunchProgressView.h"
 
 static UIColor *Gold(void) { return [UIColor colorWithRed:0.88 green:0.73 blue:0.43 alpha:1]; }
@@ -45,13 +46,16 @@ static UIStackView *Stack(NSArray<UIView *> *views, CGFloat spacing) {
     UIStackView *_columns;
     NSLayoutConstraint *_leftWidth;
     UILabel *_stateLabel, *_detailLabel, *_versionLabel, *_startupLabel, *_compatibilityLabel;
-    UIButton *_editionButton, *_preferencesButton, *_primaryButton;
+    UIButton *_editionButton, *_preferencesButton, *_primaryButton, *_loginAccountButton;
+    UISegmentedControl *_loginSelector;
+    TKWoWBattleNetSessionStore *_loginStore;
     UIBarButtonItem *_refreshItem, *_addonsItem;
     UIActivityIndicatorView *_activity;
 }
 - (instancetype)initWithLibrary:(TKAppLibrary *)library {
     if (!(self=[super initWithNibName:nil bundle:nil])) return nil;
     _library=library; self.title=@"";
+    _loginStore=[TKWoWBattleNetSessionStore new];
     NSUserDefaults *defaults=NSUserDefaults.standardUserDefaults;
     _product=TKWoWProducts()[0];
     for (NSDictionary *p in TKWoWProducts()) if ([p[@"id"] isEqual:[defaults stringForKey:@"WoWProduct"]]) _product=p;
@@ -126,12 +130,19 @@ static UIStackView *Stack(NSArray<UIView *> *views, CGFloat spacing) {
     status.backgroundColor=[UIColor colorWithRed:0.07 green:0.105 blue:0.15 alpha:1];
     status.layer.cornerRadius=16; status.layer.borderWidth=1;
     status.layer.borderColor=[Gold() colorWithAlphaComponent:0.24].CGColor;
+    _loginSelector=[[UISegmentedControl alloc] initWithItems:@[@"Login with Battle.net",@"Login ingame"]];
+    _loginSelector.accessibilityIdentifier=@"wow.loginMethod";
+    _loginSelector.accessibilityLabel=@"Login method";
+    [_loginSelector addTarget:self action:@selector(loginMethodChanged) forControlEvents:UIControlEventValueChanged];
+    _loginAccountButton=[self button:@"wow.loginAccount" action:@selector(loginAccount)];
+    [_loginAccountButton setTitle:@"Battle.net account…" forState:UIControlStateNormal];
+    _loginAccountButton.tintColor=Gold();
     _primaryButton=[self button:@"wow.primary" action:@selector(primaryAction)];
     [_primaryButton.heightAnchor constraintGreaterThanOrEqualToConstant:52].active=YES;
     _updatesLabel=Label(12,UIFontWeightRegular,Muted()); _updatesLabel.accessibilityIdentifier=@"wow.updates";
     _updatesLabel.text=@"Updates automatically. Keep this app open while downloading.";
     _startupLabel=Label(12,UIFontWeightRegular,Muted()); _startupLabel.accessibilityIdentifier=@"wow.startup";
-    UIStackView *right=Stack(@[status,_primaryButton,_updatesLabel,_startupLabel],12);
+    UIStackView *right=Stack(@[status,_loginSelector,_primaryButton,_loginAccountButton,_updatesLabel,_startupLabel],12);
     _columns=Stack(@[left,right],32); _columns.accessibilityIdentifier=@"wow.columns";
     _columns.alignment=UIStackViewAlignmentTop;
     _leftWidth=[left.widthAnchor constraintEqualToAnchor:_columns.widthAnchor multiplier:0.38];
@@ -340,6 +351,14 @@ static UIStackView *Stack(NSArray<UIView *> *views, CGFloat spacing) {
     if (_signingIn || _starting || _sessionUsed || !self.startApp) return;
     [self.battleNetHandoff invalidate]; self.battleNetHandoff=nil;
     if (![NSUserDefaults.standardUserDefaults boolForKey:TKWoWBrowserLoginEnabledKey]) { self.startApp(app); return; }
+    NSError *savedError=nil;
+    NSString *saved=[_loginStore ticketForRegion:_region error:&savedError];
+    if (saved) {
+        self.battleNetHandoff=[[TKWoWLoginHandoff alloc] initWithTicket:saved userName:NSUserName()
+            product:_product[@"id"] region:_region locale:_locale appID:app.sha256 createdAt:NSDate.date error:&savedError];
+        if (self.battleNetHandoff) { self.startApp(app); return; }
+    }
+    if (savedError) { [self loginProblem:savedError.localizedDescription]; return; }
     _signingIn=YES; [self render];
     NSUInteger generation=_generation;
     NSString *product=_product[@"id"], *region=_region, *locale=_locale;
@@ -349,6 +368,12 @@ static UIStackView *Stack(NSArray<UIView *> *views, CGFloat spacing) {
         NSError *error=nil;
         TKWoWLoginHandoff *handoff=ticket?[[TKWoWLoginHandoff alloc] initWithTicket:ticket userName:NSUserName()
             product:product region:region locale:locale appID:app.sha256 createdAt:NSDate.date error:&error]:nil;
+        // Remember only a completed, current, user-initiated login. The server
+        // still validates this ticket when WoW authenticates; no claim of world entry.
+        if (handoff && generation==host->_generation && !host->_sessionUsed && !host->_starting &&
+            ![host->_loginStore saveTicket:ticket region:region error:&error]) {
+            [handoff invalidate]; handoff=nil;
+        }
         NSString *message=failure ?: error.localizedDescription;
         [host dismissViewControllerAnimated:YES completion:^{
             host->_signingIn=NO; [host render];
@@ -359,11 +384,9 @@ static UIStackView *Stack(NSArray<UIView *> *views, CGFloat spacing) {
                 host.startApp(app);
             } else {
                 [handoff invalidate];
-                NSString *reason=message ?: (handoff?@"Return to Wolkara and press Play to sign in again.":nil);
+                NSString *reason=message ?: (handoff?@"Return to Wolkara and press Play to continue.":nil);
                 if (!reason) return;
-                UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"Browser login" message:reason preferredStyle:UIAlertControllerStyleAlert];
-                [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
-                [host presentViewController:alert animated:YES completion:nil];
+                [host loginProblem:reason];
             }
         }];
     }];
@@ -396,6 +419,12 @@ static UIStackView *Stack(NSArray<UIView *> *views, CGFloat spacing) {
     _compatibilityLabel.hidden=!_compatibilityLabel.text.length;
     _editionButton.enabled=!_busy && !_starting && !_sessionUsed && !_signingIn;
     _preferencesButton.enabled=_editionButton.enabled;
+    BOOL browserLogin=[NSUserDefaults.standardUserDefaults boolForKey:TKWoWBrowserLoginEnabledKey];
+    _loginSelector.selectedSegmentIndex=browserLogin?0:1;
+    _loginSelector.enabled=_editionButton.enabled;
+    _loginSelector.hidden=_starting || _sessionUsed;
+    _loginAccountButton.enabled=_editionButton.enabled;
+    _loginAccountButton.hidden=!browserLogin || _starting || _sessionUsed;
     self.navigationItem.rightBarButtonItem.enabled=!_updating && !_starting && !_signingIn;
     _primaryButton.hidden=_starting || _sessionUsed;
     _updatesLabel.hidden=_starting || _sessionUsed;
@@ -463,7 +492,7 @@ static UIStackView *Stack(NSArray<UIView *> *views, CGFloat spacing) {
         case TKWoWInstallationReady:
             title=@"Ready to play";
             detail=[NSUserDefaults.standardUserDefaults boolForKey:TKWoWBrowserLoginEnabledKey]?
-                @"Your game is up to date. Play opens Battle.net browser login (experimental).":@"Your game is up to date.";
+                @"Your game is up to date. Play uses your saved Battle.net login, or opens sign-in if needed.":@"Your game is up to date.";
             action=_executionMode==TKExecutionModeNone?@"Startup unavailable":@"Play"; enabled=_executionMode!=TKExecutionModeNone; break;
         }
     }
@@ -560,10 +589,8 @@ static UIStackView *Stack(NSArray<UIView *> *views, CGFloat spacing) {
     UIAlertController *sheet=[UIAlertController alertControllerWithTitle:@"Settings"
         message:@"Updates install automatically while this app is open. Settings and addons are preserved. Startup preparation is separate from downloading updates." preferredStyle:UIAlertControllerStyleActionSheet];
     if (!_busy && !_starting && !_sessionUsed && !_signingIn) {
-        BOOL enabled=[NSUserDefaults.standardUserDefaults boolForKey:TKWoWBrowserLoginEnabledKey];
-        NSString *title=enabled?@"Battle.net browser login: On (experimental)":@"Battle.net browser login: Off (experimental)";
-        [sheet addAction:[UIAlertAction actionWithTitle:title style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
-            (void)action; [self chooseBrowserLogin];
+        [sheet addAction:[UIAlertAction actionWithTitle:@"Battle.net account" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
+            (void)action; [self loginAccount];
         }]];
     }
     if (UIDevice.currentDevice.userInterfaceIdiom==UIUserInterfaceIdiomPhone) {
@@ -600,19 +627,30 @@ static UIStackView *Stack(NSArray<UIView *> *views, CGFloat spacing) {
     }]];
     [self presentSheet:sheet anchor:nil];
 }
-- (void)chooseBrowserLogin {
-    UIAlertController *sheet=[UIAlertController alertControllerWithTitle:@"Battle.net browser login (experimental)"
-        message:@"When you press Play, sign in on Blizzard's website using your Battle.net email, then complete any CAPTCHA or verification. Wolkara passes the resulting session to WoW. Passwords are not saved. Sign in again each time you start the app.\n\nThis route still needs testing on iOS. You can return to the game's normal login at any time."
+- (void)loginMethodChanged {
+    if (_busy || _starting || _sessionUsed || _signingIn) { [self render]; return; }
+    [self.battleNetHandoff invalidate]; self.battleNetHandoff=nil;
+    [NSUserDefaults.standardUserDefaults setBool:_loginSelector.selectedSegmentIndex==0 forKey:TKWoWBrowserLoginEnabledKey];
+    [self render];
+}
+- (void)loginProblem:(NSString *)message {
+    UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"Battle.net login" message:message preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+    [self presentViewController:alert animated:YES completion:nil];
+}
+- (void)loginAccount {
+    if (_busy || _starting || _sessionUsed || _signingIn) return;
+    UIAlertController *sheet=[UIAlertController alertControllerWithTitle:@"Battle.net account"
+        message:@"Your login is remembered in this device's Keychain for the selected region. If Blizzard asks you to sign in again, or you want another account, forget it here and press Play. This does not sign you out of Safari or erase your saved key-button text."
         preferredStyle:UIAlertControllerStyleActionSheet];
-    for (NSNumber *enabled in @[@YES,@NO]) {
-        [sheet addAction:[UIAlertAction actionWithTitle:enabled.boolValue?@"Use Battle.net browser login":@"Use the game's login"
-            style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
-                (void)action; [self.battleNetHandoff invalidate]; self.battleNetHandoff=nil;
-                [NSUserDefaults.standardUserDefaults setBool:enabled.boolValue forKey:TKWoWBrowserLoginEnabledKey];
-                [self render];
-            }]];
-    }
-    [self presentSheet:sheet anchor:nil];
+    [sheet addAction:[UIAlertAction actionWithTitle:@"Forget login / Sign in again" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action) {
+        (void)action;
+        NSError *error=nil;
+        if (![self->_loginStore forgetRegion:self->_region error:&error]) { [self loginProblem:error.localizedDescription]; return; }
+        [self.battleNetHandoff invalidate]; self.battleNetHandoff=nil;
+        [self render];
+    }]];
+    [self presentSheet:sheet anchor:_loginAccountButton.hidden?nil:_loginAccountButton];
 }
 - (UILabel *)startupStatusLabel { [self loadViewIfNeeded]; return _detailLabel; }
 - (void)beginStartup {

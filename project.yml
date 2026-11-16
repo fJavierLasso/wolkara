@@ -140,7 +140,7 @@ targets:
         com.apple.developer.kernel.increased-memory-limit: true
         com.apple.developer.kernel.extended-virtual-addressing: true
         com.apple.developer.networking.networkextension: [packet-tunnel-provider]
-        keychain-access-groups: ["$(AppIdentifierPrefix)$(TOLKARA_KEYCHAIN_GROUP)"]
+        keychain-access-groups: ["$(AppIdentifierPrefix)$(TOLKARA_KEYCHAIN_GROUP)", "$(AppIdentifierPrefix)$(PRODUCT_BUNDLE_IDENTIFIER)"]
     dependencies:
       - sdk: NetworkExtension.framework
       - target: LocalAuthorizationTunnel

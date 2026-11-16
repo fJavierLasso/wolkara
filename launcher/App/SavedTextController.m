@@ -1,4 +1,5 @@
 #import "SavedTextController.h"
+#import "../../translation/AppKit/HostGameSession.h"
 #import "WKLocalization.h"
 
 @protocol WKSavedTextTarget <NSObject>
@@ -22,7 +23,7 @@
     return self;
 }
 - (BOOL)canReach:(UIView *)target {
-    return target && target == self.gameTextTarget && target.window &&
+    return !AKGameSessionUsesBattleNet() && target && target == self.gameTextTarget && target.window &&
         UIApplication.sharedApplication.applicationState == UIApplicationStateActive &&
         [target respondsToSelector:@selector(touchSubmitPrivateText:)];
 }

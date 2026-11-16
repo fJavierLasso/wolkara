@@ -12,9 +12,21 @@ print(devices[0]["udid"] if devices else "")' "$SIM")
 xcrun simctl bootstatus "$SIM_ID" -b > /dev/null
 APP=build/wow-launcher/WoWFixture.app
 mkdir -p "$APP"
+# Synthetic simulator identity only: Keychain persistence requires an application
+# identifier in the simulator entitlement section (as Xcode emits). Never
+# borrow the developer/device group or sign restricted simulator entitlements.
+cat > build/wow-launcher/fixture.entitlements <<'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<plist version="1.0"><dict>
+<key>application-identifier</key><string>TESTFIXTURE.org.tolkara.tests.wow-launcher</string>
+<key>keychain-access-groups</key><array><string>TESTFIXTURE.org.tolkara.tests.wow-launcher</string></array>
+</dict></plist>
+PLIST
+
 xcrun --sdk iphonesimulator clang -target arm64-apple-ios17.0-simulator -fobjc-arc -O1 -g \
     -Wall -Wextra -Werror -Wno-deprecated-declarations \
     launcher/WoW/*.m launcher/App/LaunchProgressView.m launcher/App/WKLocalization.m launcher/App/WolkaraForeverTheme.m launcher/App/WolkaraForeverLog.m -framework Security -framework WebKit -framework UniformTypeIdentifiers tests/test_wow_launcher_app.m -framework Foundation -framework UIKit -framework QuartzCore -framework CoreGraphics -lz \
+    -Wl,-sectcreate,__TEXT,__entitlements,build/wow-launcher/fixture.entitlements \
     -o "$APP/WoWFixture"
 cat > "$APP/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
@@ -23,6 +35,7 @@ cat > "$APP/Info.plist" <<'PLIST'
 <key>CFBundleIdentifier</key><string>org.tolkara.tests.wow-launcher</string>
 <key>CFBundleExecutable</key><string>WoWFixture</string>
 <key>CFBundleName</key><string>WoW launcher fixture</string>
+<key>TKBattleNetKeychainAccessGroup</key><string>TESTFIXTURE.org.tolkara.tests.wow-launcher</string>
 <key>CFBundlePackageType</key><string>APPL</string>
 <key>CFBundleVersion</key><string>1</string>
 <key>CFBundleShortVersionString</key><string>1.0</string>

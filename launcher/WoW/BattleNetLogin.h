@@ -5,12 +5,13 @@ NS_ASSUME_NONNULL_BEGIN
 FOUNDATION_EXPORT NSString *const TKWoWBrowserLoginEnabledKey;
 NSURL * _Nullable TKWoWLoginURL(NSString *region);
 BOOL TKWoWLoginPageIsTrusted(NSURL * _Nullable url);
+BOOL TKWoWLoginTicketIsValid(NSString * _Nullable ticket);
 BOOL TKWoWLoginCallbackURL(NSURL * _Nullable url);
 NSString * _Nullable TKWoWLoginTicketFromURL(NSURL * _Nullable url);
 NSData * _Nullable TKWoWEncryptLoginTicket(NSString *ticket, NSString *userName, NSError **error);
 
-// Only an encrypted, short-lived handoff is retained. No password, persistent
-// login, account inspection or token in arguments/environment/logs.
+// A launch retains only an encrypted, short-lived handoff. Remembered tickets
+// live separately in the device-only Keychain, never in arguments or logs.
 @interface TKWoWLoginHandoff : NSObject
 - (nullable instancetype)initWithTicket:(NSString *)ticket userName:(NSString *)userName
     product:(NSString *)product region:(NSString *)region locale:(NSString *)locale

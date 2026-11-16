@@ -17,6 +17,7 @@
 #import "../Voice/Dictation.h"
 #import "../Voice/ToolbarDictationController.h"
 #import "SavedTextController.h"
+#import "../../translation/AppKit/HostGameSession.h"
 #if TOLKARA_EXTERNAL_JIT_PROTOTYPE
 #import "ExternalJITCoordinator.h"
 #endif
@@ -355,6 +356,7 @@ static BOOL PreparedFromOutside(void) { return hd_may_run_unsigned_code() || ng_
 }
 - (void)showStartStopped {
     [self.battleNetHandoffCleanup invalidate]; self.battleNetHandoffCleanup=nil;
+    AKSetGameSessionUsesBattleNet(NO);
     [self.wowController.battleNetHandoff invalidate]; self.wowController.battleNetHandoff=nil;
     TKWoWClearLoginHandoff(@"net.battle");
     [self.launchProgress stop];
@@ -931,19 +933,21 @@ static BOOL PreparedFromOutside(void) { return hd_may_run_unsigned_code() || ng_
         // Development launches may replace the profile's arguments (tab-separated).
         [launchArguments setArray:[[argument substringFromIndex:18] componentsSeparatedByString:@"\t"]];
     }
+    AKSetGameSessionUsesBattleNet(NO);
     if (self.wowController.battleNetHandoff) {
         NSArray *authenticatedArguments=[self.wowController.battleNetHandoff consumeForAppID:app.sha256
             arguments:launchArguments preferencesDomain:@"net.battle" now:NSDate.date error:&error];
         self.wowController.battleNetHandoff=nil;
         if (!authenticatedArguments) { self.status.text=error.localizedDescription; [self showStartStopped]; return; }
         launchArguments=[authenticatedArguments mutableCopy];
+        AKSetGameSessionUsesBattleNet(YES);
         // The game reads its launch options during startup. Don't leave this
         // weak legacy envelope on disk for the rest of a long play session.
         self.battleNetHandoffCleanup=[NSTimer timerWithTimeInterval:300 repeats:NO block:^(NSTimer *timer) {
             (void)timer; TKWoWClearLoginHandoff(@"net.battle");
         }];
         [NSRunLoop.mainRunLoop addTimer:self.battleNetHandoffCleanup forMode:NSRunLoopCommonModes];
-        fprintf(log,"[host] experimental Battle.net browser handoff prepared\n");
+        fprintf(log,"[host] Battle.net browser handoff prepared\n");
     }
     const char *argv[64]; size_t argc=0;
     for (NSString *argument in launchArguments) if (argc<64) { argv[argc++]=argument.UTF8String; fprintf(log,"[host] argument %s\n",argument.UTF8String); }

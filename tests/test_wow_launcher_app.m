@@ -15,7 +15,13 @@
 #import "../launcher/WoW/AddonBrowser.h"
 #import "../launcher/WoW/BattleNetBrowser.h"
 #import "../launcher/WoW/BattleNetLogin.h"
+#import "../launcher/WoW/BattleNetSessionStore.h"
+#import <Security/Security.h>
 #import <WebKit/WebKit.h>
+
+// NSUserName is empty in this unsigned simulator fixture. Supply a synthetic
+// OS user for our handoff path; no account, host user or device data is used.
+NSString *NSUserName(void) { return @"synthetic-mobile"; }
 
 @interface TKLoginTestFrame : NSObject
 @property(nonatomic, getter=isMainFrame) BOOL mainFrame;
@@ -36,6 +42,8 @@
 @end
 @interface TKWoWBattleNetBrowser (Fixture)
 - (void)cancel;
+- (void)useBrowserReturn;
+- (void)showExternalLogin;
 @end
 static void TestLoginCallbacks(void) {
     WKWebView *web=[WKWebView new]; // No loadRequest: network-free delegate fixture.
@@ -186,7 +194,114 @@ static void TestLoginRedirectFailures(void) {
 - (void)about;
 - (void)repairInstallation;
 - (void)manageAddons;
+- (void)startVerifiedApp:(TKApp *)app;
 @end
+
+static NSString *const LoginFixtureTicket=@"US-0123456789abcdef0123456789abcdef-123456789";
+@implementation TKFixtureApp (LoginFixture)
+- (NSString *)sha256 { return @"synthetic-app-sha256"; }
+@end
+@interface TKSessionFixtureStore : TKWoWBattleNetSessionStore
+@property(nonatomic) NSUInteger reads;
+@end
+@implementation TKSessionFixtureStore
+- (NSString *)ticketForRegion:(NSString *)region error:(NSError **)error {
+    (void)region; (void)error; self.reads++; return LoginFixtureTicket;
+}
+@end
+static void TestSavedLogin(TKAppLibrary *library) {
+    TKWoWViewController *controller=[[TKWoWViewController alloc] initWithLibrary:library];
+    [controller loadViewIfNeeded];
+    TKSessionFixtureStore *store=[TKSessionFixtureStore new]; [controller setValue:store forKey:@"loginStore"];
+    __block NSUInteger launches=0;
+    controller.startApp=^(TKApp *app) { (void)app; launches++; };
+    UISegmentedControl *selector=[controller valueForKey:@"loginSelector"];
+    assert(selector.selectedSegmentIndex==1 && selector.enabled);
+    UIStackView *stack=(id)selector.superview;
+    NSUInteger index=[stack.arrangedSubviews indexOfObject:selector];
+    assert(stack.arrangedSubviews[index+1]==[controller valueForKey:@"primaryButton"]);
+    [controller startVerifiedApp:library.apps[0]];
+    assert(launches==1 && store.reads==0 && !controller.battleNetHandoff);
+    selector.selectedSegmentIndex=0; [selector sendActionsForControlEvents:UIControlEventValueChanged];
+    assert([NSUserDefaults.standardUserDefaults boolForKey:TKWoWBrowserLoginEnabledKey]);
+    [controller startVerifiedApp:library.apps[0]];
+    assert(launches==2 && store.reads==1 && controller.battleNetHandoff && !controller.presentedViewController);
+    [controller.battleNetHandoff invalidate]; controller.battleNetHandoff=nil;
+    TKWoWViewController *fresh=[[TKWoWViewController alloc] initWithLibrary:library]; [fresh loadViewIfNeeded];
+    assert([(UISegmentedControl *)[fresh valueForKey:@"loginSelector"] selectedSegmentIndex]==0);
+    [fresh setValue:store forKey:@"loginStore"]; fresh.startApp=controller.startApp;
+    [fresh startVerifiedApp:library.apps[0]];
+    assert(launches==3 && store.reads==2 && fresh.battleNetHandoff);
+    [fresh.battleNetHandoff invalidate];
+    [controller setValue:@YES forKey:@"signingIn"];
+    selector.selectedSegmentIndex=1; [selector sendActionsForControlEvents:UIControlEventValueChanged];
+    assert(selector.selectedSegmentIndex==0 && !selector.enabled);
+    [controller setValue:@NO forKey:@"signingIn"];
+    selector.selectedSegmentIndex=1; [selector sendActionsForControlEvents:UIControlEventValueChanged];
+    assert(![NSUserDefaults.standardUserDefaults boolForKey:TKWoWBrowserLoginEnabledKey]);
+    [controller startVerifiedApp:library.apps[0]];
+    assert(launches==4 && store.reads==2 && !controller.battleNetHandoff);
+    puts("Login selector PASS: placement, persistence, saved-session reuse, manual mode and in-flight lock.");
+}
+static void TestLoginSessionKeychain(void) {
+    NSString *service=[@"org.tolkara.fixture.battle-net." stringByAppendingString:NSUUID.UUID.UUIDString];
+    TKWoWBattleNetSessionStore *store=[[TKWoWBattleNetSessionStore alloc] initWithService:service];
+    @try {
+        NSError *error=nil;
+        assert(![store ticketForRegion:@"eu" error:&error] && !error);
+        assert([store saveTicket:LoginFixtureTicket region:@"eu" error:&error] && !error);
+        TKWoWBattleNetSessionStore *fresh=[[TKWoWBattleNetSessionStore alloc] initWithService:service];
+        assert([[fresh ticketForRegion:@"eu" error:&error] isEqual:LoginFixtureTicket] && !error);
+        assert(![fresh ticketForRegion:@"us" error:&error] && !error);
+        NSString *replacement=@"EU-abcdef0123456789abcdef0123456789-42";
+        assert([fresh saveTicket:replacement region:@"eu" error:&error]);
+        assert([[store ticketForRegion:@"eu" error:&error] isEqual:replacement]);
+        assert(![store saveTicket:@"invalid" region:@"eu" error:&error] && error);
+        assert(![error.description containsString:LoginFixtureTicket]);
+        assert([[store ticketForRegion:@"eu" error:NULL] isEqual:replacement]);
+        assert([store saveTicket:LoginFixtureTicket region:@"us" error:NULL]);
+        NSDictionary *query=@{(__bridge id)kSecClass:(__bridge id)kSecClassGenericPassword,
+            (__bridge id)kSecAttrService:service,(__bridge id)kSecAttrAccount:@"eu",
+            (__bridge id)kSecUseDataProtectionKeychain:@YES,(__bridge id)kSecReturnAttributes:@YES};
+        CFTypeRef item=NULL;
+        assert(SecItemCopyMatching((__bridge CFDictionaryRef)query,&item)==errSecSuccess);
+        NSDictionary *attributes=CFBridgingRelease(item);
+        assert([attributes[(__bridge id)kSecAttrAccessible] isEqual:(__bridge id)kSecAttrAccessibleWhenUnlockedThisDeviceOnly]);
+        assert(![attributes[(__bridge id)kSecAttrSynchronizable] boolValue]);
+        assert([store forgetRegion:@"eu" error:NULL] && ![fresh ticketForRegion:@"eu" error:NULL]);
+        assert([[fresh ticketForRegion:@"us" error:NULL] isEqual:LoginFixtureTicket]);
+        assert([store forgetRegion:@"eu" error:NULL]);
+        assert(![store saveTicket:LoginFixtureTicket region:@"invalid" error:NULL]);
+    } @finally {
+        assert([store forgetRegion:@"eu" error:NULL]); assert([store forgetRegion:@"us" error:NULL]);
+    }
+    puts("Login Keychain PASS: add, reload, replace, region isolation, validation, device-only protection and deletion.");
+}
+static void TestExternalBrowserReturn(void) {
+    __block NSUInteger calls=0;
+    TKWoWBattleNetBrowser *browser=[[TKWoWBattleNetBrowser alloc] initWithRegion:@"eu" completion:^(NSString *ticket,NSString *failure) {
+        assert([ticket isEqual:LoginFixtureTicket] && !failure); calls++;
+    }];
+    UITextField *field=[UITextField new];
+    [browser setValue:field forKey:@"returnField"];
+    field.text=[@"http://localhost:0/?ST=" stringByAppendingString:LoginFixtureTicket];
+    [browser useBrowserReturn]; assert(calls==0); // Explicit external-login mode required.
+    [browser setValue:@YES forKey:@"externalLoginActive"];
+    for (NSString *bad in @[@"https://evil.test/?ST=secret",@"http://localhost:0/?ST=bad",@"http://localhost:0/?ST=bad&ST=bad"]) {
+        field.text=bad; [browser useBrowserReturn]; assert(calls==0 && !field.text.length);
+    }
+    field.text=[@"  http://localhost:0/?ST=" stringByAppendingFormat:@"%@\n",LoginFixtureTicket];
+    [browser useBrowserReturn]; assert(calls==1 && !field.text.length);
+    [browser useBrowserReturn]; [browser cancel]; assert(calls==1);
+    browser=[[TKWoWBattleNetBrowser alloc] initWithRegion:@"eu" completion:^(NSString *ticket,NSString *failure) {
+        assert(!ticket && !failure); calls++;
+    }];
+    [browser setValue:field forKey:@"returnField"]; [browser setValue:@YES forKey:@"externalLoginActive"];
+    [browser cancel]; field.text=[@"http://localhost:0/?ST=" stringByAppendingString:LoginFixtureTicket];
+    [browser useBrowserReturn]; assert(calls==2);
+    field.text=@"";
+    puts("External browser return PASS: explicit import, invalid/duplicate URL rejection, clearing, cancellation and no replay.");
+}
 static atomic_uint requests, revision, updates, repairs;
 static atomic_bool failure, slow, interruptRepair;
 static TKFixtureLibrary *fixture;
@@ -408,6 +523,33 @@ static void TestAddonBrowserPolicy(void) {
     [self.controller.navigationController popToRootViewControllerAnimated:NO];
     [self tap]; [self performSelector:@selector(checkLaunch) withObject:nil afterDelay:0.3];
 }
+- (void)checkExternalBrowserLayout {
+    // Suppress the initial load in our own fixture. No network, login or credentials.
+    Method method=class_getInstanceMethod(WKWebView.class,@selector(loadRequest:));
+    IMP previous=method_getImplementation(method);
+    IMP noNetwork=imp_implementationWithBlock(^WKNavigation *(id web, NSURLRequest *request) { (void)web; (void)request; return nil; });
+    method_setImplementation(method,noNetwork);
+    TKWoWBattleNetBrowser *browser=[[TKWoWBattleNetBrowser alloc] initWithRegion:@"eu" completion:^(NSString *ticket,NSString *failure) {
+        assert(!ticket && !failure);
+    }];
+    [browser loadViewIfNeeded];
+    method_setImplementation(method,previous); imp_removeBlock(noNetwork);
+    UIViewController *previousRoot=self.window.rootViewController;
+    self.window.rootViewController=[[UINavigationController alloc] initWithRootViewController:browser];
+    [browser showExternalLogin]; [self.window layoutIfNeeded];
+    UITextField *field=(id)Find(browser.view,@"wow.login.browserReturn");
+    UIScrollView *scroll=[browser valueForKey:@"returnScroll"];
+    NSDate *deadline=[NSDate dateWithTimeIntervalSinceNow:0.5];
+    do {
+        [self.window layoutIfNeeded]; [browser.view layoutIfNeeded];
+        [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.05]];
+    } while (deadline.timeIntervalSinceNow>0);
+    [self capture:@"wow-external-login.png"];
+    assert(field.secureTextEntry && field.frame.size.height>=44 && field.bounds.size.width>100);
+    assert(field.autocorrectionType==UITextAutocorrectionTypeNo && scroll.contentSize.height>0);
+    assert(![browser valueForKey:@"web"] && Find(browser.view,@"wow.login.openBrowser"));
+    [browser cancel]; self.window.rootViewController=previousRoot;
+}
 - (void)capture:(NSString *)name {
     [self.window layoutIfNeeded];
     UIGraphicsImageRenderer *renderer=[[UIGraphicsImageRenderer alloc] initWithBounds:self.window.bounds];
@@ -491,6 +633,10 @@ static void TestAddonBrowserPolicy(void) {
     assert([[[addons valueForKey:@"store"] valueForKey:@"product"] isEqual:@"wow"]);
     [self.controller.navigationController popToRootViewControllerAnimated:NO];
     TestAddonBrowserPolicy();
+    TestSavedLogin((id)fixture);
+    TestLoginSessionKeychain();
+    TestExternalBrowserReturn();
+    [self checkExternalBrowserLayout];
     TestLoginCallbacks();
     TestLoginRedirectFailures();
     puts("WoW UIKit PASS: addon launcher access, edition context, website download policy; automatic check/update, offline retry, edition race, background cancellation, verified launch, inline preparation/failure/session end, no duplicate launches and bundled licenses."); fflush(stdout);

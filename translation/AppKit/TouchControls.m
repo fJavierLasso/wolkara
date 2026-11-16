@@ -1,4 +1,5 @@
 #import "TouchControls.h"
+#import "HostGameSession.h"
 #import "AKSupport.h"
 #import "AKHostLocalization.h"
 #import "TouchTrackpad.h"
@@ -536,6 +537,8 @@ static void AKEmitTouch(void *context, AKTrackpadAction action, double x, double
     (void)notification;
     AKGamepadLayout *layout = _gamepad.layout ?: [[AKGamepadLayout alloc] initWithDefaults:NSUserDefaults.standardUserDefaults];
     _haptics.enabled = layout.hapticsEnabled;
+    _savedTextButton.hidden = AKGameSessionUsesBattleNet();
+    _savedTextButton.enabled = !_savedTextButton.hidden;
     BOOL editing = _gamepad.editing;
     for (UIButton *button in @[_trackpadButton, _keyboardButton, _gamepadButton, _settingsButton, _leaveButton,
                                _dictateButton, _dictationSendButton, _dictationCancelButton, _savedTextButton]) {
@@ -597,18 +600,18 @@ static void AKEmitTouch(void *context, AKTrackpadAction action, double x, double
 }
 - (BOOL)gestureRecognizerShouldBegin:(UIGestureRecognizer *)recognizer {
     if (recognizer == _gamepadHold) return !_gamepad.configuring;
-    if (recognizer == _savedTextHold) return !_gamepad.configuring && !self.voiceDraftActive && !_keyboardRequested && !_savedTextEditing;
+    if (recognizer == _savedTextHold) return !AKGameSessionUsesBattleNet() && !_gamepad.configuring && !self.voiceDraftActive && !_keyboardRequested && !_savedTextEditing;
     return _gamepad.editing;
 }
 - (void)savedTextTouchDown { _savedTextHeld = NO; }
 - (void)savedTextEditorState:(NSNotification *)note { _savedTextEditing = [note.userInfo[@"active"] boolValue]; }
 - (void)editSavedText {
-    if (_savedTextHeld || _gamepad.configuring || self.voiceDraftActive || _savedTextEditing) return;
+    if (AKGameSessionUsesBattleNet() || _savedTextHeld || _gamepad.configuring || self.voiceDraftActive || _savedTextEditing) return;
     [self cancelTouches]; [self dismissKeyboard];
     [NSNotificationCenter.defaultCenter postNotificationName:@"AKTouchSavedTextAction" object:self userInfo:@{@"action":@"edit"}];
 }
 - (void)holdSavedText:(UILongPressGestureRecognizer *)press {
-    if (press.state != UIGestureRecognizerStateBegan || _savedTextHeld || _gamepad.configuring ||
+    if (AKGameSessionUsesBattleNet() || press.state != UIGestureRecognizerStateBegan || _savedTextHeld || _gamepad.configuring ||
         self.voiceDraftActive || _keyboardRequested || _savedTextEditing) return;
     _savedTextHeld = YES;
     [self cancelTouches];

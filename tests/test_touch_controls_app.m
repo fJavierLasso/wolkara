@@ -5,6 +5,7 @@
 #import "TouchGamepad.h"
 #import "TouchGamepadLayout.h"
 #import "SavedTextController.h"
+#import "HostGameSession.h"
 #include <assert.h>
 #include <dlfcn.h>
 
@@ -222,6 +223,7 @@ static UIView *FindToolbarView(UIView *view, NSString *identifier) {
 - (CGRect)toolbarBounds;
 - (BOOL)gestureRecognizerShouldBegin:(UIGestureRecognizer *)pan;
 - (void)holdSavedText:(UILongPressGestureRecognizer *)press;
+- (void)controlAppearanceChanged:(NSNotification *)note;
 - (void)holdGamepad:(UILongPressGestureRecognizer *)press;
 - (BOOL)toggleGamepadEnabled;
 @end
@@ -365,6 +367,21 @@ static void AKSavedTextSettle(UIViewController *presenter) {
     controller.gameTextTarget = nil; store.value = dummy;
     [key sendActionsForControlEvents:UIControlEventTouchDown]; [controls holdSavedText:hold]; AKSavedTextSettle(presenter);
     assert([guest.text isEqualToString:sent] && !presenter.presentedViewController);
+    // A browser-login game must hide the key even in edit mode, and reject
+    // direct/stale notifications as well as hidden-button events. Preserve text
+    // and layout so a subsequent manual-login session restores them unchanged.
+    controller.gameTextTarget=controls;
+    CGRect keyFrame=key.frame; NSUInteger writes=store.writes;
+    AKSetGameSessionUsesBattleNet(YES); [controls controlAppearanceChanged:nil];
+    assert(key.hidden && !key.enabled);
+    [key sendActionsForControlEvents:UIControlEventTouchDown]; [controls holdSavedText:hold];
+    [key sendActionsForControlEvents:UIControlEventTouchUpInside];
+    [NSNotificationCenter.defaultCenter postNotificationName:@"AKTouchSavedTextAction" object:controls userInfo:@{@"action":@"type"}];
+    AKSavedTextSettle(presenter);
+    assert([guest.text isEqualToString:sent] && !presenter.presentedViewController);
+    assert(store.writes==writes && [store.value isEqual:dummy] && CGRectEqualToRect(keyFrame,key.frame));
+    AKSetGameSessionUsesBattleNet(NO); [controls controlAppearanceChanged:nil];
+    assert(!key.hidden && key.enabled && CGRectEqualToRect(keyFrame,key.frame));
     // Isolated synthetic item only; never use the app's actual service or value.
     NSString *service = [@"org.tolkara.fixture.saved-text." stringByAppendingString:NSUUID.UUID.UUIDString];
     WKSavedTextStore *realStore = [[WKSavedTextStore alloc] initWithService:service];
