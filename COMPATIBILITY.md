@@ -14,6 +14,27 @@ pull request; say what you tested, on what hardware, with which execution mode
 | Heroes of Might and Magic III: Horn of the Abyss (GOG, Windows x86, with the HD mod) | HotA 1.8.1, HD mod 5.8 | iPad Pro M5, iPadOS 27 | Developer service | New games on scenario maps: adventure map, towns, battles, AI turns with up to eight players over several days, saving and loading, music and sound, mouse and keyboard. Runs through Tolkara's builds of Wine and FEX, with the HD mod's GDI renderer. | Local signing cannot run it (FEX translates the game's code while it runs). About 33 s of memory preparation per launch. A double click is not recognised (Enter opens a selected town). Light grey margins when the HD mod letterboxes the game. Saving fails if launched with the development option `--case-insensitive-files`. Performance not measured. | [`heroes3-hota`](profiles/heroes3-hota) |
 | Cyberpunk 2077 (GOG, macOS arm64) | 2.3.x (buildId 59052989568257053) | iPad Pro M5, iPadOS 27 | Developer service | Experimental software-memory mode completes all 6,540 initializers, main, GOG initialization, archives, scripts and shader caches, creates the game window, and visibly renders the opening cinematic with a Space-to-continue prompt. | Menu content and gameplay unverified. Early presentation samples are about 5 FPS, then settle near 1 FPS in the cinematic, with long pauses. Manual Space presses reach the adapter queue but have not visibly continued the game; routing 4 GiB pools to software passes the earlier Foundation allocation failure and reaches further loading. Loader and call-wrapper unwind support clears the GOG rich-presence abort on the iPad: the call reports its service error and returns, and loading continues. The merged-main run logs a main-menu presence state; visual menu and gameplay validation remain pending. Tests use a 3600-second watchdog timeout and a two-CPU query cap. See [VM investigation](docs/CYBERPUNK_VM.md) and [software-memory experiment](docs/SOFTWARE_MEMORY.md). | [`cyberpunk-2077`](profiles/cyberpunk-2077) |
 
+## Battle.net browser login experiment (2026-11-17)
+
+Added an opt-in browser login in the home screen's Settings. The user completes
+Blizzard's web login and challenges. A short-lived, single-consumption handoff
+uses the public native macOS preferences format documented by Waypoint, inspired
+by Scuffle's browser-login approach. The original guest is unchanged. This does
+not install Battle.net or add a Windows/Wine/Rosetta runtime.
+
+Validation: synthetic host tests under ASan/UBSan passed for the reference
+cipher vector, callback validation, malformed tickets, launch arguments,
+preferences isolation/cleanup, expiration and consumed/cancelled handoffs.
+The iPhone 17 UIKit fixture passed with main-frame-only browser callbacks,
+cancellation/duplicate-callback protection and the existing normal launch flow.
+The Release iOS build and app-bundle/signature checks passed.
+
+**No real Battle.net account login through this route has been validated on the
+Duo yet.** A browser ticket does not prove game authentication. The recent
+manual-login log reported status 14400 after a CAPTCHA submission; it did not
+prove the password shortcut caused the failure. See
+[the experiment and current limits](docs/BATTLE_NET_LOGIN.md).
+
 ## Startup fixes for issues #13 and #21 (2026-11-16)
 
 The launcher now writes the complete supported CDN hosts/server metadata on

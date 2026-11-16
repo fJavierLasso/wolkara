@@ -55,6 +55,10 @@ WoW gameplay under this capability set remain untested.
 ## Features
 
 - A single WoW home screen with edition, region and language selection.
+- Optional **Settings → Battle.net browser login (experimental)** opens
+  Blizzard's login before Play and hands its session to the native macOS client.
+  Off by default; complete CAPTCHA/2FA yourself. The first iOS implementation
+  still needs an end-to-end account login test. See [browser login](docs/BATTLE_NET_LOGIN.md).
 - On-device installation and automatic update checks; required updates finish
   before Play becomes available.
 - Resumable downloads, checksum verification and reuse of verified unchanged

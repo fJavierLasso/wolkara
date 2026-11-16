@@ -13,6 +13,60 @@
 #import "../launcher/WoW/AddonManager.h"
 #import "../launcher/WoW/AddonStore.h"
 #import "../launcher/WoW/AddonBrowser.h"
+#import "../launcher/WoW/BattleNetBrowser.h"
+#import "../launcher/WoW/BattleNetLogin.h"
+#import <WebKit/WebKit.h>
+
+@interface TKLoginTestFrame : NSObject
+@property(nonatomic, getter=isMainFrame) BOOL mainFrame;
+@end
+@implementation TKLoginTestFrame
+@end
+@interface TKLoginTestNavigation : NSObject
+@property(nonatomic) NSURLRequest *request;
+@property(nonatomic) TKLoginTestFrame *sourceFrame, *targetFrame;
+@end
+@implementation TKLoginTestNavigation
+@end
+@interface TKWoWBattleNetBrowser (Fixture)
+- (void)cancel;
+@end
+static void TestLoginCallbacks(void) {
+    WKWebView *web=[WKWebView new]; // No loadRequest: network-free delegate fixture.
+    NSString *token=@"US-0123456789abcdef0123456789abcdef-123456789";
+    TKLoginTestNavigation *action=[TKLoginTestNavigation new];
+    action.request=[NSURLRequest requestWithURL:[NSURL URLWithString:[@"http://localhost:0/?ST=" stringByAppendingString:token]]];
+    action.sourceFrame=[TKLoginTestFrame new]; action.targetFrame=[TKLoginTestFrame new];
+    action.targetFrame.mainFrame=YES;
+    __block NSUInteger calls=0;
+    TKWoWBattleNetBrowser *browser=[[TKWoWBattleNetBrowser alloc] initWithRegion:@"eu" completion:^(NSString *ticket,NSString *failure) {
+        assert([ticket isEqual:token] && !failure); calls++;
+    }];
+    // Do not load its view: these delegate fixtures never request a web page.
+    [browser setValue:@YES forKey:@"visitedLogin"];
+    void (^policy)(WKNavigationActionPolicy)=^(WKNavigationActionPolicy value) { assert(value==WKNavigationActionPolicyCancel); };
+    [(id<WKNavigationDelegate>)browser webView:web decidePolicyForNavigationAction:(id)action decisionHandler:policy];
+    assert(calls==0); // iframe targeting the main frame cannot supply a ticket
+    action.sourceFrame.mainFrame=YES; action.targetFrame.mainFrame=NO;
+    [(id<WKNavigationDelegate>)browser webView:web decidePolicyForNavigationAction:(id)action decisionHandler:policy];
+    assert(calls==0);
+    action.targetFrame.mainFrame=YES;
+    [(id<WKNavigationDelegate>)browser webView:web decidePolicyForNavigationAction:(id)action decisionHandler:policy];
+    assert(calls==1);
+    [(id<WKNavigationDelegate>)browser webView:web decidePolicyForNavigationAction:(id)action decisionHandler:policy];
+    [browser cancel]; assert(calls==1); // completion is terminal, including late cancellation
+    browser=[[TKWoWBattleNetBrowser alloc] initWithRegion:@"eu" completion:^(NSString *ticket,NSString *failure) {
+        assert(!ticket && failure); calls++;
+    }];
+    [(id<WKNavigationDelegate>)browser webView:web decidePolicyForNavigationAction:(id)action decisionHandler:policy];
+    assert(calls==2); // no committed Blizzard login page
+    browser=[[TKWoWBattleNetBrowser alloc] initWithRegion:@"eu" completion:^(NSString *ticket,NSString *failure) {
+        assert(!ticket && !failure); calls++;
+    }];
+    [browser cancel];
+    [(id<WKNavigationDelegate>)browser webView:web decidePolicyForNavigationAction:(id)action decisionHandler:policy];
+    assert(calls==3);
+}
 
 // The production Swift archive is covered by test_forever_ui_archive.swift.
 // This UI fixture only needs its no-pending-restore bridge to open the launcher.
@@ -93,6 +147,7 @@ static void TestAddonBrowserPolicy(void) {
     method_setImplementation(class_getInstanceMethod(TKWoWClient.class,@selector(planForProduct:region:locale:error:)),(IMP)Plan);
     method_setImplementation(class_getInstanceMethod(TKWoWUpdater.class,@selector(updatePlan:root:progress:error:)),(IMP)Update);
     [NSUserDefaults.standardUserDefaults setObject:@"wowf" forKey:@"WoWProduct"];
+    [NSUserDefaults.standardUserDefaults removeObjectForKey:TKWoWBrowserLoginEnabledKey];
     [NSUserDefaults.standardUserDefaults removeObjectForKey:@"WoWRepairRequested.wowf"];
     [NSUserDefaults.standardUserDefaults removeObjectForKey:@"WoWInstallRequested.wowf"];
     // Device language must not change this fork's English launcher UI.
@@ -334,6 +389,7 @@ static void TestAddonBrowserPolicy(void) {
     assert([[[addons valueForKey:@"store"] valueForKey:@"product"] isEqual:@"wow"]);
     [self.controller.navigationController popToRootViewControllerAnimated:NO];
     TestAddonBrowserPolicy();
+    TestLoginCallbacks();
     puts("WoW UIKit PASS: addon launcher access, edition context, website download policy; automatic check/update, offline retry, edition race, background cancellation, verified launch, inline preparation/failure/session end, no duplicate launches and bundled licenses."); fflush(stdout);
     if (![NSProcessInfo.processInfo.arguments containsObject:@"--preview"]) exit(0);
     // Leave a ready home for visual inspection; no real download or guest runs.

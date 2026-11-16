@@ -101,6 +101,36 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
+## Battle.net browser login experiment
+
+The web-login and native macOS handoff in `launcher/WoW/BattleNetLogin.m`
+were adapted from Waypoint's `Sources/WaypointCore/LaunchOptions.swift` and
+documented login flow, revision `a9aa570adc4afcc36420314bb6bc33d24caf8b49`:
+https://github.com/wowlocal/waypoint-launcher. The synthetic cipher test vector
+also comes from its `Tests/WaypointCoreTests/LaunchTests.swift`.
+
+Waypoint's BSD Zero Clause License:
+
+Copyright (c) 2026 Waypoint contributors
+
+Permission to use, copy, modify, and/or distribute this software for any
+purpose with or without fee is hereby granted.
+
+THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES WITH
+REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY
+AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY SPECIAL, DIRECT,
+INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM
+LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR
+OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
+PERFORMANCE OF THIS SOFTWARE.
+
+[Scuffle](https://github.com/nyrda/scuffle) (MIT), revision
+`5efccb44777bba7e28e70ef782564b713e7373b5`, inspired this browser-login route.
+Its BGS protocol client and Windows DPAPI/registry helper are not copied or
+included. [slashplayed](https://github.com/paulstraw/slashplayed)'s
+`shims/appkit/spuikit.m` was consulted for the iOS CFPreferences handoff;
+no implementation code is copied from it.
+
 ## WolkaraForever contributions
 
 Selected source and tests under `launcher/WoW`, `launcher/Voice`, `launcher/Input`,

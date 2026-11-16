@@ -8,6 +8,7 @@
 #import "ExecutionMode.h"
 #import "LibraryViewController.h"
 #import "../WoW/WoWViewController.h"
+#import "../WoW/BattleNetLogin.h"
 #import "LaunchProgressView.h"
 #import "NativeGuest.h"
 #include "GuestWait.h"
@@ -49,6 +50,7 @@
 // closes cleanly ends the process so the next tap starts another app.
 @property(nonatomic) BOOL uiSession;
 @property(nonatomic) BOOL consumedImportArgument;
+@property(nonatomic, strong) NSTimer *battleNetHandoffCleanup;
 // This launch's execution mode and where it came from (logged; never a path).
 @property(nonatomic) TKExecutionMode executionMode;
 @property(nonatomic,copy) NSString *executionModeSource;
@@ -262,6 +264,8 @@ static BOOL PreparedFromOutside(void) { return hd_may_run_unsigned_code() || ng_
     for(NSUInteger i=1;i<arguments.count;i++)
         if(![arguments[i] hasPrefix:TKExecutionModeArgumentPrefix] && ![arguments[i] isEqual:@"--network-health"]) plain=NO;
     if (plain) {
+        // Only this app's iOS preferences container, never the Mac's launcher.
+        TKWoWClearLoginHandoff(@"net.battle");
         self.uiSession=YES;
         self.libraryController=[[TKLibraryViewController alloc] initWithLibrary:self.library];
         self.libraryController.delegate=self;
@@ -350,6 +354,9 @@ static BOOL PreparedFromOutside(void) { return hd_may_run_unsigned_code() || ng_
     [self.navigation pushViewController:controller animated:YES];
 }
 - (void)showStartStopped {
+    [self.battleNetHandoffCleanup invalidate]; self.battleNetHandoffCleanup=nil;
+    [self.wowController.battleNetHandoff invalidate]; self.wowController.battleNetHandoff=nil;
+    TKWoWClearLoginHandoff(@"net.battle");
     [self.launchProgress stop];
     [self stopStartupActivity];
     self.diagnosticsButton.hidden=NO;
@@ -923,6 +930,20 @@ static BOOL PreparedFromOutside(void) { return hd_may_run_unsigned_code() || ng_
     for (NSString *argument in arguments) if ([argument hasPrefix:@"--guest-arguments="]) {
         // Development launches may replace the profile's arguments (tab-separated).
         [launchArguments setArray:[[argument substringFromIndex:18] componentsSeparatedByString:@"\t"]];
+    }
+    if (self.wowController.battleNetHandoff) {
+        NSArray *authenticatedArguments=[self.wowController.battleNetHandoff consumeForAppID:app.sha256
+            arguments:launchArguments preferencesDomain:@"net.battle" now:NSDate.date error:&error];
+        self.wowController.battleNetHandoff=nil;
+        if (!authenticatedArguments) { self.status.text=error.localizedDescription; [self showStartStopped]; return; }
+        launchArguments=[authenticatedArguments mutableCopy];
+        // The game reads its launch options during startup. Don't leave this
+        // weak legacy envelope on disk for the rest of a long play session.
+        self.battleNetHandoffCleanup=[NSTimer timerWithTimeInterval:300 repeats:NO block:^(NSTimer *timer) {
+            (void)timer; TKWoWClearLoginHandoff(@"net.battle");
+        }];
+        [NSRunLoop.mainRunLoop addTimer:self.battleNetHandoffCleanup forMode:NSRunLoopCommonModes];
+        fprintf(log,"[host] experimental Battle.net browser handoff prepared\n");
     }
     const char *argv[64]; size_t argc=0;
     for (NSString *argument in launchArguments) if (argc<64) { argv[argc++]=argument.UTF8String; fprintf(log,"[host] argument %s\n",argument.UTF8String); }

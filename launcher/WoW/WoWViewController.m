@@ -7,6 +7,8 @@
 #import "AddonManager.h"
 #import "ForeverUI.h"
 #import "UpdateLock.h"
+#import "BattleNetLogin.h"
+#import "BattleNetBrowser.h"
 #import "../App/LaunchProgressView.h"
 
 static UIColor *Gold(void) { return [UIColor colorWithRed:0.88 green:0.73 blue:0.43 alpha:1]; }
@@ -32,7 +34,7 @@ static UIStackView *Stack(NSArray<UIView *> *views, CGFloat spacing) {
     NSError *_error;
     NSDate *_checkedAt;
     NSUInteger _generation;
-    BOOL _busy, _updating, _updateError, _starting;
+    BOOL _busy, _updating, _updateError, _starting, _signingIn;
     BOOL _checkedThisLaunch, _resumeCheck, _launchWhenReady, _checkOwnsIdleTimer, _previousIdleTimerDisabled;
     NSString *_startupFailure;
     UILabel *_updatesLabel;
@@ -207,7 +209,7 @@ static UIStackView *Stack(NSArray<UIView *> *views, CGFloat spacing) {
 - (void)setExecutionMode:(TKExecutionMode)mode { _executionMode=mode; if (self.isViewLoaded) [self render]; }
 - (void)setSessionUsed:(BOOL)used { _sessionUsed=used; if (used) [self cancel]; if (self.isViewLoaded) [self render]; }
 - (void)selectProduct:(NSDictionary *)product {
-    if (_starting || _sessionUsed) return;
+    if (_starting || _sessionUsed || _signingIn) return;
     if (![TKWoWProducts() containsObject:product]) return;
     _product=product;
     [NSUserDefaults.standardUserDefaults setObject:product[@"id"] forKey:@"WoWProduct"];
@@ -216,7 +218,7 @@ static UIStackView *Stack(NSArray<UIView *> *views, CGFloat spacing) {
 - (void)refresh { [self checkForUpdatesAndLaunch:NO]; }
 - (void)checkForUpdatesAndLaunch:(BOOL)launch { [self checkForUpdatesAndLaunch:launch install:NO]; }
 - (void)checkForUpdatesAndLaunch:(BOOL)launch install:(BOOL)install {
-    if (_starting || _sessionUsed) return;
+    if (_starting || _sessionUsed || _signingIn) return;
     NSString *installKey=[@"WoWInstallRequested." stringByAppendingString:_product[@"id"]];
     NSString *repairKey=[@"WoWRepairRequested." stringByAppendingString:_product[@"id"]];
     if(install && _installation.state==TKWoWInstallationNeedsRepair)
@@ -318,12 +320,12 @@ static UIStackView *Stack(NSArray<UIView *> *views, CGFloat spacing) {
             self->_checkedAt=plan?NSDate.date:nil; self->_busy=NO; self->_updating=NO; self->_updateError=updateAttempted && error; [self render];
             // Returning from the background or changing edition invalidates this request.
             if (launch && self->_launchWhenReady && UIApplication.sharedApplication.applicationState==UIApplicationStateActive && !error && !client.cancelled && installation.state==TKWoWInstallationReady && installation.app && !self->_sessionUsed &&
-                self.view.window && self.navigationController.topViewController==self && self.startApp) self.startApp(installation.app);
+                self.view.window && self.navigationController.topViewController==self && self.startApp) [self startVerifiedApp:installation.app];
         });
     });
 }
 - (void)primaryAction {
-    if (_busy || _sessionUsed || _starting) return;
+    if (_busy || _sessionUsed || _starting || _signingIn) return;
     if (_resumeCheck) { [self refresh]; return; }
     if (_startupFailure) { _startupFailure=nil; [self render]; }
     if (_error || !_plan) { [self refresh]; return; }
@@ -333,6 +335,41 @@ static UIStackView *Stack(NSArray<UIView *> *views, CGFloat spacing) {
     if (_installation.state!=TKWoWInstallationReady) return;
     if (_executionMode==TKExecutionModeNone) return;
     [self checkForUpdatesAndLaunch:YES];
+}
+- (void)startVerifiedApp:(TKApp *)app {
+    if (_signingIn || _starting || _sessionUsed || !self.startApp) return;
+    [self.battleNetHandoff invalidate]; self.battleNetHandoff=nil;
+    if (![NSUserDefaults.standardUserDefaults boolForKey:TKWoWBrowserLoginEnabledKey]) { self.startApp(app); return; }
+    _signingIn=YES; [self render];
+    NSUInteger generation=_generation;
+    NSString *product=_product[@"id"], *region=_region, *locale=_locale;
+    __weak typeof(self) weakSelf=self;
+    TKWoWBattleNetBrowser *browser=[[TKWoWBattleNetBrowser alloc] initWithRegion:region completion:^(NSString *ticket, NSString *failure) {
+        TKWoWViewController *host=weakSelf; if (!host) return;
+        NSError *error=nil;
+        TKWoWLoginHandoff *handoff=ticket?[[TKWoWLoginHandoff alloc] initWithTicket:ticket userName:NSUserName()
+            product:product region:region locale:locale appID:app.sha256 createdAt:NSDate.date error:&error]:nil;
+        NSString *message=failure ?: error.localizedDescription;
+        [host dismissViewControllerAnimated:YES completion:^{
+            host->_signingIn=NO; [host render];
+            if (generation!=host->_generation || host->_sessionUsed || host->_starting) { [handoff invalidate]; return; }
+            if (handoff && UIApplication.sharedApplication.applicationState==UIApplicationStateActive &&
+                host.view.window && host.navigationController.topViewController==host && host.startApp) {
+                host.battleNetHandoff=handoff;
+                host.startApp(app);
+            } else {
+                [handoff invalidate];
+                NSString *reason=message ?: (handoff?@"Return to Wolkara and press Play to sign in again.":nil);
+                if (!reason) return;
+                UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"Browser login" message:reason preferredStyle:UIAlertControllerStyleAlert];
+                [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+                [host presentViewController:alert animated:YES completion:nil];
+            }
+        }];
+    }];
+    UINavigationController *navigation=[[UINavigationController alloc] initWithRootViewController:browser];
+    navigation.modalPresentationStyle=UIModalPresentationFullScreen; navigation.modalInPresentation=YES;
+    [self presentViewController:navigation animated:YES completion:nil];
 }
 - (void)repairInstallation {
     if(_busy || _starting || _sessionUsed || !_installation.app)return;
@@ -357,9 +394,9 @@ static UIStackView *Stack(NSArray<UIView *> *views, CGFloat spacing) {
         @"Compatibility with this edition is not yet verified.":
         @"";
     _compatibilityLabel.hidden=!_compatibilityLabel.text.length;
-    _editionButton.enabled=!_busy && !_starting && !_sessionUsed;
+    _editionButton.enabled=!_busy && !_starting && !_sessionUsed && !_signingIn;
     _preferencesButton.enabled=_editionButton.enabled;
-    self.navigationItem.rightBarButtonItem.enabled=!_updating && !_starting;
+    self.navigationItem.rightBarButtonItem.enabled=!_updating && !_starting && !_signingIn;
     _primaryButton.hidden=_starting || _sessionUsed;
     _updatesLabel.hidden=_starting || _sessionUsed;
     _startupLabel.hidden=_starting || _sessionUsed;
@@ -425,14 +462,15 @@ static UIStackView *Stack(NSArray<UIView *> *views, CGFloat spacing) {
             action=@"Repair installation"; enabled=YES; break;
         case TKWoWInstallationReady:
             title=@"Ready to play";
-            detail=@"Your game is up to date.";
+            detail=[NSUserDefaults.standardUserDefaults boolForKey:TKWoWBrowserLoginEnabledKey]?
+                @"Your game is up to date. Play opens Battle.net browser login (experimental).":@"Your game is up to date.";
             action=_executionMode==TKExecutionModeNone?@"Startup unavailable":@"Play"; enabled=_executionMode!=TKExecutionModeNone; break;
         }
     }
     _stateLabel.text=title; _detailLabel.text=detail;
-    [self configureButton:_primaryButton title:action filled:YES]; _primaryButton.enabled=enabled;
-    _refreshItem.enabled=!_busy && !_sessionUsed && !_starting;
-    _addonsItem.enabled=!_busy && !_sessionUsed && !_starting && _installation.app!=nil;
+    [self configureButton:_primaryButton title:action filled:YES]; _primaryButton.enabled=enabled && !_signingIn;
+    _refreshItem.enabled=!_busy && !_sessionUsed && !_starting && !_signingIn;
+    _addonsItem.enabled=!_busy && !_sessionUsed && !_starting && !_signingIn && _installation.app!=nil;
     if (_busy) [_activity startAnimating]; else [_activity stopAnimating];
     if (_checkedAt) {
         NSString *time=[NSDateFormatter localizedStringFromDate:_checkedAt dateStyle:NSDateFormatterNoStyle timeStyle:NSDateFormatterShortStyle];
@@ -482,7 +520,9 @@ static UIStackView *Stack(NSArray<UIView *> *views, CGFloat spacing) {
 }
 - (void)preferences {
     UIAlertController *sheet=[UIAlertController alertControllerWithTitle:@"Download preferences"
-        message:@"These settings do not change your game's login region." preferredStyle:UIAlertControllerStyleActionSheet];
+        message:[NSUserDefaults.standardUserDefaults boolForKey:TKWoWBrowserLoginEnabledKey]?
+            @"This region and language also apply to Battle.net browser login.":@"These settings do not change your game's login region."
+        preferredStyle:UIAlertControllerStyleActionSheet];
     [sheet addAction:[UIAlertAction actionWithTitle:@"Region" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) { (void)a; [self choosePreference:YES]; }]];
     [sheet addAction:[UIAlertAction actionWithTitle:@"Language" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) { (void)a; [self choosePreference:NO]; }]];
     [self presentSheet:sheet anchor:_preferencesButton];
@@ -519,6 +559,13 @@ static UIStackView *Stack(NSArray<UIView *> *views, CGFloat spacing) {
 - (void)settings {
     UIAlertController *sheet=[UIAlertController alertControllerWithTitle:@"Settings"
         message:@"Updates install automatically while this app is open. Settings and addons are preserved. Startup preparation is separate from downloading updates." preferredStyle:UIAlertControllerStyleActionSheet];
+    if (!_busy && !_starting && !_sessionUsed && !_signingIn) {
+        BOOL enabled=[NSUserDefaults.standardUserDefaults boolForKey:TKWoWBrowserLoginEnabledKey];
+        NSString *title=enabled?@"Battle.net browser login: On (experimental)":@"Battle.net browser login: Off (experimental)";
+        [sheet addAction:[UIAlertAction actionWithTitle:title style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
+            (void)action; [self chooseBrowserLogin];
+        }]];
+    }
     if (UIDevice.currentDevice.userInterfaceIdiom==UIUserInterfaceIdiomPhone) {
         [sheet addAction:[UIAlertAction actionWithTitle:@"Rendering quality" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
             (void)action; [self chooseRenderScale];
@@ -551,6 +598,20 @@ static UIStackView *Stack(NSArray<UIView *> *views, CGFloat spacing) {
         [details addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
         [self presentViewController:details animated:YES completion:nil];
     }]];
+    [self presentSheet:sheet anchor:nil];
+}
+- (void)chooseBrowserLogin {
+    UIAlertController *sheet=[UIAlertController alertControllerWithTitle:@"Battle.net browser login (experimental)"
+        message:@"When you press Play, sign in on Blizzard's website using your Battle.net email, then complete any CAPTCHA or verification. Wolkara passes the resulting session to WoW. Passwords are not saved. Sign in again each time you start the app.\n\nThis route still needs testing on iOS. You can return to the game's normal login at any time."
+        preferredStyle:UIAlertControllerStyleActionSheet];
+    for (NSNumber *enabled in @[@YES,@NO]) {
+        [sheet addAction:[UIAlertAction actionWithTitle:enabled.boolValue?@"Use Battle.net browser login":@"Use the game's login"
+            style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
+                (void)action; [self.battleNetHandoff invalidate]; self.battleNetHandoff=nil;
+                [NSUserDefaults.standardUserDefaults setBool:enabled.boolValue forKey:TKWoWBrowserLoginEnabledKey];
+                [self render];
+            }]];
+    }
     [self presentSheet:sheet anchor:nil];
 }
 - (UILabel *)startupStatusLabel { [self loadViewIfNeeded]; return _detailLabel; }
