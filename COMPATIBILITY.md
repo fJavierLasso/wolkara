@@ -64,7 +64,12 @@ isolated simulator Keychain add/reload/update/delete with device-only attributes
 The key-toolbar fixture passes hiding, stale action rejection, and preservation
 of text/position; its separate older saved-password Keychain probe remains
 unavailable in that ad-hoc fixture. Release compilation, bundle/signature checks
-and app-only Keychain entitlement separation from the tunnel pass.
+and app-only Keychain entitlement separation from the tunnel pass. The build
+from `a7002c1` was installed over the existing Wolkara on the Duo via Wi-Fi,
+after the user closed the app and the device process check confirmed it. Device
+installation and launch both succeeded; game data was preserved. Provider
+sign-in, cross-launch account reuse and key visibility during a real game still
+await the user's test.
 
 ## Startup fixes for issues #13 and #21 (2026-11-16)
 
