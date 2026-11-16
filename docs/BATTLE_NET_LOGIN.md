@@ -22,8 +22,12 @@ Wolkara runs the native macOS client, so that helper cannot be reused directly.
 This implementation follows [Waypoint's native Mac flow](https://github.com/wowlocal/waypoint-launcher/blob/a9aa570adc4afcc36420314bb6bc33d24caf8b49/Sources/WaypointCore/LaunchOptions.swift):
 
 1. Open `https://<region>.battle.net/login/en/?externalChallenge=login&app=WoW`.
-2. Intercept the top-level `http://localhost:0/?ST=…` redirect before loading it.
-   Reject malformed, duplicate or untrusted callbacks. Do not inspect forms,
+2. Collect the top-level `http://localhost:0/?ST=…` redirect in the navigation
+   policy, server-redirect callback, or the failing-URL field when WebKit rejects
+   port 0 before the policy callback. The latter paths require our browser's
+   current approved main-frame login navigation. Cancelled, superseded and
+   policy-rejected callbacks cannot create a session. Reject malformed,
+   duplicate or untrusted callbacks. Do not inspect forms,
    inject scripts, override TLS verification or automate submissions.
 3. Encrypt the returned ticket in the native Mac launch-options format:
    AES-128-CBC/PKCS7, zero IV, PBKDF2-HMAC-SHA1 with the documented fixed entropy
@@ -61,7 +65,9 @@ game executable, system trust or authentication requirements.
   `bash tools/test_wow_browser_login.sh`. Preferences tests need permission to
   write their temporary domain in the user's Library.
 - `tools/test_wow_launcher_ui.sh` covers callback cancellation, main-frame
-  restrictions and unchanged manual-login launching without network access.
+  restrictions, redirect delivery through WebKit error URL/string fields,
+  stale/foreign navigation rejection, secret-free error messages and unchanged
+  manual-login launching without network access.
 - Do not export a real `net.battle.plist`, collect raw callback URLs or publish
   unredacted Connection.log when investigating an account test.
 

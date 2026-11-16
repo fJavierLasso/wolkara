@@ -10,6 +10,8 @@
     void (^_completion)(NSString *,NSString *);
     NSTimer *_timeout;
     BOOL _finished, _visitedLogin;
+    WKNavigation *_mainNavigation;
+    BOOL _nextNavigationTrusted, _mainNavigationTrusted, _rejectedCallback;
     UILabel *_host;
 }
 - (instancetype)initWithRegion:(NSString *)region completion:(void (^)(NSString *,NSString *))completion {
@@ -61,6 +63,19 @@
     if (self.isMovingFromParentViewController || self.navigationController.isBeingDismissed || self.isBeingDismissed) [self cancel];
 }
 - (void)dealloc { [_timeout invalidate]; }
+- (BOOL)finishCallbackURL:(NSURL *)url {
+    if (!TKWoWLoginCallbackURL(url)) return NO;
+    NSString *ticket=_visitedLogin?TKWoWLoginTicketFromURL(url):nil;
+    [self finish:ticket failure:ticket?nil:@"Battle.net returned an invalid login response."];
+    return YES;
+}
+- (BOOL)isCurrentLoginNavigation:(WKNavigation *)navigation webView:(WKWebView *)webView {
+    // These delegate callbacks describe the main-frame navigation. Bind the
+    // fallback to our browser's approved HTTPS load, not a subframe, rejected
+    // policy action or a late failure from a superseded navigation.
+    return !_finished && webView==_web && _visitedLogin && _mainNavigationTrusted && !_rejectedCallback &&
+        (!navigation || navigation==_mainNavigation);
+}
 - (void)webView:(WKWebView *)webView decidePolicyForNavigationAction:(WKNavigationAction *)action
     decisionHandler:(void (^)(WKNavigationActionPolicy))decisionHandler {
     (void)webView; NSURL *url=action.request.URL;
@@ -69,30 +84,61 @@
         // Only the top-level login navigation can finish an attempt. A CAPTCHA
         // iframe or popup must never inject a different account's ticket.
         BOOL top=action.targetFrame.isMainFrame && action.sourceFrame.isMainFrame;
-        NSString *ticket=top && _visitedLogin?TKWoWLoginTicketFromURL(url):nil;
+        if (!top) _rejectedCallback=YES;
         decisionHandler(WKNavigationActionPolicyCancel);
-        if (top) [self finish:ticket failure:ticket?nil:@"Battle.net returned an invalid login response."];
+        if (top) [self finishCallbackURL:url];
         return;
     }
     if (action.targetFrame.isMainFrame || !action.targetFrame) {
         if (!TKWoWLoginPageIsTrusted(url)) {
+            _nextNavigationTrusted=NO;
             decisionHandler(WKNavigationActionPolicyCancel);
             _host.text=@"Use your Battle.net email login here. External sign-in providers are not supported yet.";
             return;
         }
+        if (action.targetFrame.isMainFrame) _nextNavigationTrusted=YES;
     } else if (![@[@"https",@"about",@"data",@"blob"] containsObject:url.scheme.lowercaseString]) {
         decisionHandler(WKNavigationActionPolicyCancel); return;
     }
     decisionHandler(WKNavigationActionPolicyAllow);
 }
+- (void)webView:(WKWebView *)webView didStartProvisionalNavigation:(WKNavigation *)navigation {
+    if (_finished || webView!=_web) return;
+    _mainNavigation=navigation;
+    _mainNavigationTrusted=_nextNavigationTrusted || TKWoWLoginPageIsTrusted(webView.URL);
+    _nextNavigationTrusted=NO; _rejectedCallback=NO;
+}
+- (void)webView:(WKWebView *)webView didReceiveServerRedirectForProvisionalNavigation:(WKNavigation *)navigation {
+    // Some WebKit versions expose localhost:0 here, others only in the error
+    // below. It is a delivery endpoint, not a page that should be contacted.
+    if (![self isCurrentLoginNavigation:navigation webView:webView]) return;
+    if ([self finishCallbackURL:webView.URL]) return;
+    if (webView.URL && !TKWoWLoginPageIsTrusted(webView.URL)) _mainNavigationTrusted=NO;
+}
 - (void)webView:(WKWebView *)webView didCommitNavigation:(WKNavigation *)navigation {
-    (void)navigation;
-    if (TKWoWLoginPageIsTrusted(webView.URL)) { _visitedLogin=YES; _host.text=webView.URL.host; }
+    if (_finished || webView!=_web) return;
+    if (TKWoWLoginPageIsTrusted(webView.URL)) {
+        _visitedLogin=YES; _host.text=webView.URL.host;
+        _mainNavigation=navigation; _mainNavigationTrusted=YES;
+    }
 }
 - (void)webView:(WKWebView *)webView didFailProvisionalNavigation:(WKNavigation *)navigation withError:(NSError *)error {
-    (void)webView; (void)navigation;
+    if (_finished || webView!=_web || (navigation && _mainNavigation && navigation!=_mainNavigation)) return;
     if ([error.domain isEqual:NSURLErrorDomain] && error.code==NSURLErrorCancelled) return;
-    [self finish:nil failure:@"The Battle.net login page could not load. Check your connection and try again."];
+    // WebKit can reject port 0 before decidePolicyForNavigationAction sees the
+    // final redirect. Waypoint handles the same case via the failing URL.
+    // Read only the documented URL fields, never localizedDescription or a
+    // nested error; those may contain credentials and unrelated URLs.
+    id value=error.userInfo[NSURLErrorFailingURLErrorKey];
+    NSURL *url=[value isKindOfClass:NSURL.class]?value:nil;
+    if (!url) {
+        id string=error.userInfo[NSURLErrorFailingURLStringErrorKey];
+        if ([string isKindOfClass:NSString.class] && [string length]<=8192) url=[NSURL URLWithString:string];
+    }
+    if ([self isCurrentLoginNavigation:navigation webView:webView] && [self finishCallbackURL:url]) return;
+    NSString *kind=[error.domain isEqual:NSURLErrorDomain]?@"network":
+        ([error.domain isEqual:WKErrorDomain] || [error.domain isEqual:@"WebKitErrorDomain"])?@"WebKit":@"navigation";
+    [self finish:nil failure:[NSString stringWithFormat:@"The Battle.net login page could not load (%@ %ld). Please try again.",kind,(long)error.code]];
 }
 - (void)webView:(WKWebView *)webView didFailNavigation:(WKNavigation *)navigation withError:(NSError *)error {
     [self webView:webView didFailProvisionalNavigation:navigation withError:error];

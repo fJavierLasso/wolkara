@@ -103,8 +103,9 @@ SOFTWARE.
 
 ## Battle.net browser login experiment
 
-The web-login and native macOS handoff in `launcher/WoW/BattleNetLogin.m`
-were adapted from Waypoint's `Sources/WaypointCore/LaunchOptions.swift` and
+The web-login and native macOS handoff in `launcher/WoW/BattleNetLogin.m` and
+`launcher/WoW/BattleNetBrowser.m` were adapted from Waypoint's
+`Sources/WaypointCore/LaunchOptions.swift`, `Sources/Waypoint/WebLogin.swift` and
 documented login flow, revision `a9aa570adc4afcc36420314bb6bc33d24caf8b49`:
 https://github.com/wowlocal/waypoint-launcher. The synthetic cipher test vector
 also comes from its `Tests/WaypointCoreTests/LaunchTests.swift`.

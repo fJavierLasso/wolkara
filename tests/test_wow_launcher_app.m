@@ -28,6 +28,12 @@
 @end
 @implementation TKLoginTestNavigation
 @end
+@interface TKLoginTestWebView : WKWebView
+@property(nonatomic) NSURL *fixtureURL;
+@end
+@implementation TKLoginTestWebView
+- (NSURL *)URL { return self.fixtureURL; }
+@end
 @interface TKWoWBattleNetBrowser (Fixture)
 - (void)cancel;
 @end
@@ -66,6 +72,102 @@ static void TestLoginCallbacks(void) {
     [browser cancel];
     [(id<WKNavigationDelegate>)browser webView:web decidePolicyForNavigationAction:(id)action decisionHandler:policy];
     assert(calls==3);
+}
+static TKWoWBattleNetBrowser *LoginBrowser(TKLoginTestWebView *web, WKNavigation *navigation, BOOL visited,
+    void (^completion)(NSString *,NSString *)) {
+    TKWoWBattleNetBrowser *browser=[[TKWoWBattleNetBrowser alloc] initWithRegion:@"eu" completion:completion];
+    // No loadView/loadRequest: drive the real delegate with synthetic WebKit
+    // events and distinct navigation identities, without network or an account.
+    [browser setValue:web forKey:@"web"];
+    web.fixtureURL=TKWoWLoginURL(@"eu");
+    TKLoginTestNavigation *action=[TKLoginTestNavigation new];
+    action.request=[NSURLRequest requestWithURL:web.fixtureURL];
+    action.sourceFrame=[TKLoginTestFrame new]; action.sourceFrame.mainFrame=YES;
+    action.targetFrame=[TKLoginTestFrame new]; action.targetFrame.mainFrame=YES;
+    id<WKNavigationDelegate> delegate=(id)browser;
+    [delegate webView:web decidePolicyForNavigationAction:(id)action decisionHandler:^(WKNavigationActionPolicy value) {
+        assert(value==WKNavigationActionPolicyAllow);
+    }];
+    [delegate webView:web didStartProvisionalNavigation:navigation];
+    if (visited) [delegate webView:web didCommitNavigation:navigation];
+    return browser;
+}
+static void TestLoginRedirectFailures(void) {
+    TKLoginTestWebView *web=[TKLoginTestWebView new];
+    WKNavigation *navigation=(id)[NSObject new];
+    NSURL *callback=[NSURL URLWithString:@"http://localhost:0/?ST=US-0123456789abcdef0123456789abcdef-123456789"];
+    NSString *ticket=TKWoWLoginTicketFromURL(callback);
+    __block NSUInteger successes=0, failures=0, cancelled=0;
+    void (^completion)(NSString *,NSString *)=^(NSString *value, NSString *failure) {
+        if (value) { assert([value isEqual:ticket] && !failure); successes++; }
+        else if (failure) {
+            assert(![failure containsString:ticket] && ![failure containsString:@"localhost"]);
+            assert(![failure containsString:@"private-description"]); failures++;
+        } else cancelled++;
+    };
+    for (NSString *key in @[NSURLErrorFailingURLErrorKey,NSURLErrorFailingURLStringErrorKey]) {
+        TKWoWBattleNetBrowser *browser=LoginBrowser(web,navigation,YES,completion);
+        NSError *error=[NSError errorWithDomain:@"WebKitErrorDomain" code:103 userInfo:@{
+            key:[key isEqual:NSURLErrorFailingURLErrorKey]?(id)callback:callback.absoluteString,
+            NSLocalizedDescriptionKey:@"private-description"}];
+        [(id<WKNavigationDelegate>)browser webView:web didFailProvisionalNavigation:navigation withError:error];
+        [(id<WKNavigationDelegate>)browser webView:web didFailProvisionalNavigation:navigation withError:error];
+        [browser cancel];
+    }
+    assert(successes==2 && failures==0 && cancelled==0);
+    NSError *redirectError=[NSError errorWithDomain:NSURLErrorDomain code:NSURLErrorCannotConnectToHost
+        userInfo:@{NSURLErrorFailingURLErrorKey:callback}];
+    TKWoWBattleNetBrowser *browser=LoginBrowser(web,navigation,YES,completion);
+    web.fixtureURL=callback;
+    [(id<WKNavigationDelegate>)browser webView:web didReceiveServerRedirectForProvisionalNavigation:navigation];
+    [(id<WKNavigationDelegate>)browser webView:web didFailProvisionalNavigation:navigation withError:redirectError];
+    assert(successes==3 && failures==0);
+    // A callback without a trusted committed login, a foreign web view, or a
+    // superseded main navigation must never acquire a game session.
+    browser=LoginBrowser(web,navigation,NO,completion);
+    [(id<WKNavigationDelegate>)browser webView:web didFailProvisionalNavigation:navigation withError:redirectError];
+    assert(successes==3 && failures==1);
+    browser=LoginBrowser(web,navigation,YES,completion);
+    TKLoginTestWebView *foreign=[TKLoginTestWebView new];
+    [(id<WKNavigationDelegate>)browser webView:foreign didFailProvisionalNavigation:navigation withError:redirectError];
+    WKNavigation *old=(id)[NSObject new];
+    [(id<WKNavigationDelegate>)browser webView:web didFailProvisionalNavigation:old withError:redirectError];
+    assert(successes==3 && failures==1);
+    [(id<WKNavigationDelegate>)browser webView:web didFailProvisionalNavigation:navigation withError:redirectError];
+    assert(successes==4);
+    // Cancellation and a policy-rejected iframe callback cannot be promoted
+    // into successful authentication through the error fallback.
+    browser=LoginBrowser(web,navigation,YES,completion);
+    NSError *cancel=[NSError errorWithDomain:NSURLErrorDomain code:NSURLErrorCancelled userInfo:@{NSURLErrorFailingURLErrorKey:callback}];
+    [(id<WKNavigationDelegate>)browser webView:web didFailProvisionalNavigation:navigation withError:cancel];
+    assert(successes==4 && failures==1); [browser cancel]; assert(cancelled==1);
+    [(id<WKNavigationDelegate>)browser webView:web didFailProvisionalNavigation:navigation withError:redirectError];
+    assert(successes==4);
+    browser=LoginBrowser(web,navigation,YES,completion);
+    TKLoginTestNavigation *iframe=[TKLoginTestNavigation new];
+    iframe.request=[NSURLRequest requestWithURL:callback];
+    iframe.sourceFrame=[TKLoginTestFrame new];
+    iframe.targetFrame=[TKLoginTestFrame new]; iframe.targetFrame.mainFrame=YES;
+    [(id<WKNavigationDelegate>)browser webView:web decidePolicyForNavigationAction:(id)iframe decisionHandler:^(WKNavigationActionPolicy policy) {
+        assert(policy==WKNavigationActionPolicyCancel);
+    }];
+    [(id<WKNavigationDelegate>)browser webView:web didFailProvisionalNavigation:navigation withError:redirectError];
+    assert(successes==4 && failures==2);
+    for (NSURL *url in @[[NSURL URLWithString:[callback.absoluteString stringByAppendingString:@"&ST=duplicate"]],
+        [NSURL URLWithString:[callback.absoluteString stringByReplacingOccurrencesOfString:@"localhost" withString:@"evil.test"]],
+        [NSURL URLWithString:@"https://eu.battle.net/login/"]]) {
+        browser=LoginBrowser(web,navigation,YES,completion);
+        NSError *error=[NSError errorWithDomain:NSURLErrorDomain code:NSURLErrorNotConnectedToInternet
+            userInfo:@{NSURLErrorFailingURLErrorKey:url,NSLocalizedDescriptionKey:@"private-description"}];
+        [(id<WKNavigationDelegate>)browser webView:web didFailProvisionalNavigation:navigation withError:error];
+    }
+    assert(successes==4 && failures==5);
+    browser=LoginBrowser(web,navigation,YES,completion);
+    NSError *nested=[NSError errorWithDomain:NSURLErrorDomain code:NSURLErrorServerCertificateUntrusted
+        userInfo:@{NSUnderlyingErrorKey:redirectError}];
+    [(id<WKNavigationDelegate>)browser webView:web didFailProvisionalNavigation:navigation withError:nested];
+    assert(successes==4 && failures==6);
+    puts("Battle.net browser PASS: redirect/error delivery, URL/string error fields, no replay, main-navigation binding and safe failures.");
 }
 
 // The production Swift archive is covered by test_forever_ui_archive.swift.
@@ -390,6 +492,7 @@ static void TestAddonBrowserPolicy(void) {
     [self.controller.navigationController popToRootViewControllerAnimated:NO];
     TestAddonBrowserPolicy();
     TestLoginCallbacks();
+    TestLoginRedirectFailures();
     puts("WoW UIKit PASS: addon launcher access, edition context, website download policy; automatic check/update, offline retry, edition race, background cancellation, verified launch, inline preparation/failure/session end, no duplicate launches and bundled licenses."); fflush(stdout);
     if (![NSProcessInfo.processInfo.arguments containsObject:@"--preview"]) exit(0);
     // Leave a ready home for visual inspection; no real download or guest runs.

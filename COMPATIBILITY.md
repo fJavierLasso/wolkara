@@ -38,6 +38,23 @@ manual-login log reported status 14400 after a CAPTCHA submission; it did not
 prove the password shortcut caused the failure. See
 [the experiment and current limits](docs/BATTLE_NET_LOGIN.md).
 
+The first device attempts reached the website login but the user reported
+"The Battle.net login page could not load" after completing authentication.
+The initial adapter omitted Waypoint's alternate return paths: a server redirect
+or a provisional-load error whose failing URL contains the localhost callback.
+Those paths are now handled for the current trusted main-frame navigation, with
+the same strict URL/ticket validation. Cancellation, stale/foreign navigations,
+policy-rejected iframe callbacks and nested unrelated errors cannot supply a
+ticket. Other failures show only an error category/code, never a raw URL/error.
+
+The updated UIKit fixture passes the synthetic redirect/error cases (both URL
+and string fields), duplicate delivery, rejected origins and secret-free failure
+messages. Release compilation and bundle/signature checks pass. The corrected
+app was installed and opened on the Duo over Wi-Fi after confirming it was
+closed. The user's repeat login test remains pending; the missing handler is
+confirmed in our code, but no real callback or successful game login has yet
+been observed.
+
 ## Startup fixes for issues #13 and #21 (2026-11-16)
 
 The launcher now writes the complete supported CDN hosts/server metadata on
