@@ -14,6 +14,59 @@ pull request; say what you tested, on what hardware, with which execution mode
 | Heroes of Might and Magic III: Horn of the Abyss (GOG, Windows x86, with the HD mod) | HotA 1.8.1, HD mod 5.8 | iPad Pro M5, iPadOS 27 | Developer service | New games on scenario maps: adventure map, towns, battles, AI turns with up to eight players over several days, saving and loading, music and sound, mouse and keyboard. Runs through Tolkara's builds of Wine and FEX, with the HD mod's GDI renderer. | Local signing cannot run it (FEX translates the game's code while it runs). About 33 s of memory preparation per launch. A double click is not recognised (Enter opens a selected town). Light grey margins when the HD mod letterboxes the game. Saving fails if launched with the development option `--case-insensitive-files`. Performance not measured. | [`heroes3-hota`](profiles/heroes3-hota) |
 | Cyberpunk 2077 (GOG, macOS arm64) | 2.3.x (buildId 59052989568257053) | iPad Pro M5, iPadOS 27 | Developer service | Experimental software-memory mode completes all 6,540 initializers, main, GOG initialization, archives, scripts and shader caches, creates the game window, and visibly renders the opening cinematic with a Space-to-continue prompt. | Menu content and gameplay unverified. Early presentation samples are about 5 FPS, then settle near 1 FPS in the cinematic, with long pauses. Manual Space presses reach the adapter queue but have not visibly continued the game; routing 4 GiB pools to software passes the earlier Foundation allocation failure and reaches further loading. Loader and call-wrapper unwind support clears the GOG rich-presence abort on the iPad: the call reports its service error and returns, and loading continues. The merged-main run logs a main-menu presence state; visual menu and gameplay validation remain pending. Tests use a 3600-second watchdog timeout and a two-CPU query cap. See [VM investigation](docs/CYBERPUNK_VM.md) and [software-memory experiment](docs/SOFTWARE_MEMORY.md). | [`cyberpunk-2077`](profiles/cyberpunk-2077) |
 
+## Audio interruption recovery and Questie metadata (2026-11-18)
+
+The user reported permanently silent game audio after playing a video in another
+app on the Duo. The game session previously used exclusive Playback, lifecycle
+observation in the coordinator began only after dictation, and reactivation did
+not restart RemoteIO outputs stopped by the system.
+
+Playback now uses MixWithOthers. The session owner observes game interruptions
+from the first playback request, restores activation after interruption-end or
+foreground/scene activation (including a missing interruption-end), and retries
+transient activation failures with a bounded delay. Hardware queries cannot
+repeatedly activate an already-active session or reclaim one during an
+interruption. Dictation retains its lease and cancels pending recovery attempts.
+The adapter restarts only RemoteIO outputs that the application requested to run;
+explicit stop, uninitialization and disposal remove them from recovery tracking.
+
+Packed native float32 PCM output fades to 35% gain over 80 ms in the background
+or when iOS reports another app's primary audio, then returns to full gain when
+that condition ends. This changes only the game's rendered samples, never system
+volume or the video's audio. Unrecognized sample formats pass through unchanged.
+The render path takes no locks or allocations; optional sample diagnostics remain
+opt-in. Full reconstruction following a media-server reset is not implemented.
+
+Validation: coordinator tests cover mixing, repeated hardware queries, interrupted
+and foreground recovery, attenuation, dictation, activation failure and cancelled
+retries. A real simulator RemoteIO callback resumes after a system-side stop,
+while explicitly stopped, uninitialized and disposed units remain stopped.
+CoreAudio property regression checks, 47 toolbar/dictation checks, ASan/UBSan gain
+and buffer-bound checks, the signed Release build and app-bundle checks pass.
+Physical mixing, audible recovery and route switching still require the user's
+Duo check; simulator callback progress is not proof of audible device output.
+
+The user also reported "game client not supported" beside Questie in the addon
+manager. The installed official Questie 12.10.0 package has that literal title
+in its generic Questie.toc (interface 00000), alongside a valid Forever TOC
+(interface 16001). The manager had concatenated TOCs alphabetically and used the
+first title. It now prefers Forever/Camelot metadata for wowf, or a matching
+interface for other clients, while retaining all interfaces for advisory checks.
+Reload repairs presentation of existing and disabled packages without changing
+addon files. The generic error remains the fallback for an unknown client.
+
+Production importer tests cover those choices, disable/restore, unmanaged
+folders and unchanged TOC bytes. The archive regression suite passes 58 checks.
+The Duo copy of Questie matches all 532 files in the official 12.10.0 bundle;
+QuestieDB was absent. QuestieDB 1.1.2 Forever was downloaded from the official
+release and verified against its published SHA-256, then prepared through the
+production extractor/store with the existing package records preserved.
+The signed update was installed in place over Wi-Fi after the closed-app guard.
+QuestieDB was copied to the Duo and all 64 files plus the package manifest read
+back byte-for-byte successfully. The existing Questie/QuestieTrace package was
+preserved, and the launcher was opened. In-game Questie initialization remains
+pending user confirmation.
+
 ## Battle.net browser login experiment (2026-11-17)
 
 Added an opt-in browser login in the home screen's Settings. The user completes

@@ -1,6 +1,8 @@
 #import <AudioToolbox/AudioToolbox.h>
 #import <AVFAudio/AVFAudio.h>
 #import "AKSupport.h"
+#import "AKAudioPlayback.h"
+#import "OutputGain.h"
 #include <dlfcn.h>
 #include <stdatomic.h>
 static BOOL renderProbeEnabled(void) {
@@ -11,15 +13,59 @@ static BOOL renderProbeEnabled(void) {
 @interface AKAudioRenderProbe : NSObject {
 @public
     AURenderCallbackStruct original;
+    atomic_bool scale;
+    _Atomic(float) step;
+    float gain;
+    BOOL trace;
     atomic_uint_fast64_t calls, frames, nonzeroBuffers, errors, silent;
 }
 @end
 @implementation AKAudioRenderProbe @end
 static NSMutableDictionary<NSValue *,NSMutableArray<AKAudioRenderProbe *> *> *renderProbes;
+static NSMutableSet<NSValue *> *runningOutputs;
+static _Atomic(float) outputGain = 1.0f;
+static void *native(const char *name);
+
+static void recoverOutputs(void) {
+    OSStatus (*start)(AudioUnit) = native("AudioOutputUnitStart");
+    if (!start) return;
+    // Start/stop/uninitialize/dispose share this lock. A recovery cannot revive a
+    // stopped unit or use a unit after disposal. The render callback takes no lock.
+    @synchronized(runningOutputs) {
+        for (NSValue *key in runningOutputs) {
+            OSStatus status = start(key.pointerValue);
+            AKLogC("audio resume output status=%d", (int)status);
+        }
+    }
+}
+static void prepareOutputs(void) {
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        renderProbes = [NSMutableDictionary new];
+        runningOutputs = [NSMutableSet new];
+        NSNotificationCenter *center = NSNotificationCenter.defaultCenter;
+        [center addObserverForName:AKGameAudioRecovered object:nil queue:NSOperationQueue.mainQueue
+            usingBlock:^(NSNotification *note) { (void)note; recoverOutputs(); }];
+        [center addObserverForName:AKGameAudioGainChanged object:nil queue:NSOperationQueue.mainQueue
+            usingBlock:^(NSNotification *note) {
+                NSNumber *value = note.userInfo[@"gain"];
+                if ([value isKindOfClass:NSNumber.class] && isfinite(value.floatValue))
+                    atomic_store_explicit(&outputGain, fmaxf(0, fminf(1, value.floatValue)), memory_order_relaxed);
+            }];
+    });
+}
+static void updateRenderFormat(AudioUnit unit, AudioStreamBasicDescription format) {
+    @synchronized(renderProbes) {
+        for (AKAudioRenderProbe *probe in renderProbes[[NSValue valueWithPointer:unit]]) {
+            atomic_store(&probe->step, AKCanScaleOutput(format) ? 1.0f / (float)(format.mSampleRate * 0.08) : 0);
+            atomic_store(&probe->scale, AKCanScaleOutput(format));
+        }
+    }
+}
 static void prepareProbes(void) {
     static dispatch_once_t once;
     dispatch_once(&once,^{
-        renderProbes=[NSMutableDictionary new];
+        prepareOutputs();
         static dispatch_source_t timer;
         timer=dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER,0,0,dispatch_get_global_queue(QOS_CLASS_UTILITY,0));
         dispatch_source_set_timer(timer,dispatch_time(DISPATCH_TIME_NOW,5*NSEC_PER_SEC),5*NSEC_PER_SEC,NSEC_PER_SEC);
@@ -35,6 +81,12 @@ static void prepareProbes(void) {
 static OSStatus observeRender(void *context,AudioUnitRenderActionFlags *flags,const AudioTimeStamp *time,UInt32 bus,UInt32 frames,AudioBufferList *buffers) {
     AKAudioRenderProbe *probe=(__bridge AKAudioRenderProbe *)context;
     OSStatus status=probe->original.inputProc(probe->original.inputProcRefCon,flags,time,bus,frames,buffers);
+    if (!status && atomic_load_explicit(&probe->scale, memory_order_relaxed)) {
+        probe->gain = AKScaleOutput(buffers, frames, probe->gain,
+            atomic_load_explicit(&outputGain, memory_order_relaxed),
+            atomic_load_explicit(&probe->step, memory_order_relaxed));
+    }
+    if (!probe->trace) return status;
     atomic_fetch_add_explicit(&probe->calls,1,memory_order_relaxed);
     atomic_fetch_add_explicit(&probe->frames,frames,memory_order_relaxed);
     if(status)atomic_fetch_add_explicit(&probe->errors,1,memory_order_relaxed);
@@ -64,6 +116,7 @@ static OSStatus defaultOutput(UInt32 *device) {
 AudioComponent AudioComponentFindNext(AudioComponent previous,const AudioComponentDescription *description) {
     AudioComponent (*f)(AudioComponent,const AudioComponentDescription *)=native(__func__);
     if(!f || !description)return NULL;
+    prepareOutputs();
     AudioComponentDescription mapped=*description;
     if(mapped.componentType==kAudioUnitType_Output && (mapped.componentSubType=='ahal' || mapped.componentSubType=='def ')) {
         mapped.componentSubType=kAudioUnitSubType_RemoteIO;
@@ -98,8 +151,17 @@ OSStatus AudioUnitSetProperty(AudioUnit unit,AudioUnitPropertyID property,AudioU
         UInt32 requested=0,current=0;
         if(!data || size!=sizeof requested)s=kAudioUnitErr_InvalidPropertyValue;
         else { memcpy(&requested,data,sizeof requested);s=defaultOutput(&current);if(!s && requested!=current)s=kAudioUnitErr_InvalidPropertyValue; }
-    } else if(property==kAudioUnitProperty_SetRenderCallback && scope==kAudioUnitScope_Input && element==0 && data && size==sizeof(AURenderCallbackStruct) && remoteOutput(unit) && renderProbeEnabled()) {
-        prepareProbes();AKAudioRenderProbe *probe=[AKAudioRenderProbe new];memcpy(&probe->original,data,size);
+    } else if(property==kAudioUnitProperty_SetRenderCallback && scope==kAudioUnitScope_Input && element==0 && data && size==sizeof(AURenderCallbackStruct) && remoteOutput(unit)) {
+        prepareOutputs();
+        if (renderProbeEnabled()) prepareProbes();
+        AKAudioRenderProbe *probe=[AKAudioRenderProbe new];memcpy(&probe->original,data,size);
+        probe->gain = atomic_load(&outputGain); probe->trace = renderProbeEnabled();
+        AudioStreamBasicDescription format = {0}; UInt32 formatSize = sizeof format;
+        OSStatus (*get)(AudioUnit,AudioUnitPropertyID,AudioUnitScope,AudioUnitElement,void *,UInt32 *) = native("AudioUnitGetProperty");
+        if (get && !get(unit,kAudioUnitProperty_StreamFormat,kAudioUnitScope_Input,0,&format,&formatSize) && AKCanScaleOutput(format)) {
+            atomic_store(&probe->scale, true);
+            atomic_store(&probe->step, 1.0f / (float)(format.mSampleRate * 0.08));
+        }
         if(probe->original.inputProc) {
             AURenderCallbackStruct observed={observeRender,(__bridge void *)probe};
             @synchronized(renderProbes) {
@@ -112,6 +174,7 @@ OSStatus AudioUnitSetProperty(AudioUnit unit,AudioUnitPropertyID property,AudioU
     } else s=f?f(unit,property,scope,element,data,size):-4;
     if(property==kAudioUnitProperty_StreamFormat && data && size==sizeof(AudioStreamBasicDescription)) {
         AudioStreamBasicDescription format;memcpy(&format,data,sizeof format);
+        if (!s && scope==kAudioUnitScope_Input && element==0) updateRenderFormat(unit, format);
         AKLogC("audio stream rate=%.0f format=%#x flags=%#x channels=%u bytes_per_frame=%u bits=%u",format.mSampleRate,(unsigned)format.mFormatID,(unsigned)format.mFormatFlags,(unsigned)format.mChannelsPerFrame,(unsigned)format.mBytesPerFrame,(unsigned)format.mBitsPerChannel);
     }
     AKLogC("audio set property=%u scope=%u element=%u size=%u status=%d",(unsigned)property,(unsigned)scope,(unsigned)element,(unsigned)size,(int)s);return s;
@@ -139,13 +202,40 @@ OSStatus AudioUnitInitialize(AudioUnit unit) {
     OSStatus (*f)(AudioUnit)=native(__func__);OSStatus s=f?f(unit):-4;AKLogC("audio initialize status=%d",(int)s);return s;
 }
 OSStatus AudioOutputUnitStart(AudioUnit unit) {
-    OSStatus (*f)(AudioUnit)=native(__func__);OSStatus s=f?f(unit):-4;AKLogC("audio start status=%d",(int)s);
+    prepareOutputs();
+    OSStatus (*f)(AudioUnit)=native(__func__); OSStatus s;
+    @synchronized(runningOutputs) {
+        s=f?f(unit):-4;
+        if (!s && remoteOutput(unit)) [runningOutputs addObject:[NSValue valueWithPointer:unit]];
+    }
+    AKLogC("audio start status=%d",(int)s);
     AVAudioSession *session=AVAudioSession.sharedInstance;
     AKLog(@"audio route types=%@ volume=%.2f sample_rate=%.0f channels=%lu",[session.currentRoute.outputs valueForKey:@"portType"],session.outputVolume,session.sampleRate,(unsigned long)session.outputNumberOfChannels);
     return s;
 }
+OSStatus AudioOutputUnitStop(AudioUnit unit) {
+    prepareOutputs();
+    OSStatus (*f)(AudioUnit)=native(__func__);
+    @synchronized(runningOutputs) {
+        [runningOutputs removeObject:[NSValue valueWithPointer:unit]];
+        return f?f(unit):-4;
+    }
+}
+OSStatus AudioUnitUninitialize(AudioUnit unit) {
+    prepareOutputs();
+    OSStatus (*f)(AudioUnit)=native(__func__);
+    @synchronized(runningOutputs) {
+        [runningOutputs removeObject:[NSValue valueWithPointer:unit]];
+        return f?f(unit):-4;
+    }
+}
 OSStatus AudioComponentInstanceDispose(AudioComponentInstance instance) {
-    OSStatus (*f)(AudioComponentInstance)=native(__func__);OSStatus s=f?f(instance):-4;
-    if(!s && renderProbes)@synchronized(renderProbes) { [renderProbes removeObjectForKey:[NSValue valueWithPointer:instance]]; }
+    prepareOutputs();
+    OSStatus (*f)(AudioComponentInstance)=native(__func__); OSStatus s;
+    @synchronized(runningOutputs) {
+        [runningOutputs removeObject:[NSValue valueWithPointer:instance]];
+        s=f?f(instance):-4;
+    }
+    if(!s) @synchronized(renderProbes) { [renderProbes removeObjectForKey:[NSValue valueWithPointer:instance]]; }
     return s;
 }

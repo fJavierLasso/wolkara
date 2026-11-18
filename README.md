@@ -105,6 +105,10 @@ WoW gameplay under this capability set remain untested.
 - Declares support for Apple's Game Mode so the system can enable it during
   full-screen play. The integrated build retains its increased-memory-limit
   entitlement; Game Mode does not promise a fixed amount of extra memory.
+- Game audio mixes with other apps, with lower game volume in the background or
+  when iOS signals another app's primary audio. It restores the session and active
+  audio outputs after interruptions and on return to the foreground. Some system
+  interruptions still require the other audio session to end first.
 - **Add-ons** on the launcher: open **Browse CurseForge**, find the addon on the
   real website and choose its ZIP download. Wolkara receives the browser download,
   validates the archive and installs it automatically. No API key is needed.
@@ -113,6 +117,8 @@ WoW gameplay under this capability set remain untested.
   Dependencies and extra modules hosted as separate projects need their own ZIP
   downloads (for example, Questie needs QuestieDB). Database add-ons with large
   TOCs are supported; only the metadata preview is bounded, never the installed files.
+  Multi-client packages use the selected edition's TOC for their displayed name
+  and version, rather than a generic unsupported-client placeholder.
   There is no automatic update polling. Choose the correct game version on the
   site; compatibility tags are advisory, not a gameplay guarantee.
   Navigation stays locked through download/install, with cancellation available

@@ -4,6 +4,8 @@
 #import "../App/WolkaraForeverLog.h"
 
 #import <AVFAudio/AVFAudio.h>
+#import <UIKit/UIKit.h>
+#import "../../translation/AKSupport/AKAudioPlayback.h"
 #include <dlfcn.h>
 
 NSNotificationName const AKAudioPushToTalkLeaseDidChangeNotification =
@@ -29,6 +31,8 @@ static char const AKAudioCoordinatorQueueKey;
     BOOL _gameWantsPlayback;
     NSString *_lastTransition;
     BOOL _observing;
+    BOOL _playbackActive, _applyingPlayback, _interrupted, _background;
+    NSUInteger _recoveryGeneration;
 }
 
 + (instancetype)shared {
@@ -114,6 +118,7 @@ static char const AKAudioCoordinatorQueueKey;
 - (BOOL)requestGamePlayback:(NSString *)why {
     __block BOOL ok = NO;
     [self onTheQueue:^{
+        [self startObserving];
         NSString *from = [self nameForLease:_lease];
         if (_lease == AKAudioLeasePushToTalk) {
             // Push to talk owns the session right now. The wish is recorded and honoured when the
@@ -127,6 +132,9 @@ static char const AKAudioCoordinatorQueueKey;
         }
         _gameWantsPlayback = YES;
         _lease = AKAudioLeaseGame;
+        // Hardware queries must not reclaim an interrupted session or recursively
+        // activate it from inside the platform's own category/activation calls.
+        if (_interrupted || _playbackActive || _applyingPlayback) { ok = YES; return; }
         ok = [self applyPlaybackForGame];
         [self logTransitionFrom:from to:@"game" result:ok error:nil];
     }];
@@ -136,6 +144,7 @@ static char const AKAudioCoordinatorQueueKey;
 - (void)releaseGamePlayback {
     [self onTheQueue:^{
         _gameWantsPlayback = NO;
+        ++_recoveryGeneration;
         if (_lease != AKAudioLeaseGame) return;
         NSString *from = [self nameForLease:_lease];
         _lease = AKAudioLeaseNone;
@@ -150,6 +159,8 @@ static char const AKAudioCoordinatorQueueKey;
     __block NSError *failure = nil;
     [self onTheQueue:^{
         NSString *from = [self nameForLease:_lease];
+        ++_recoveryGeneration;
+        _playbackActive = NO;
         AVAudioSession *session = AVAudioSession.sharedInstance;
         // PlayAndRecord with mixing, so the game keeps its sound while the user talks. Record
         // alone - which is what this shipped with - takes the output away from the process,
@@ -241,6 +252,7 @@ static char const AKAudioCoordinatorQueueKey;
         if (_gameWantsPlayback) {
             _lease = AKAudioLeaseGame;
             ok = [self applyPlaybackForGame];
+            if (ok) [self publishPlaybackRecovery];
             [self logTransitionFrom:from to:@"game" result:ok error:failure];
         } else {
             _lease = AKAudioLeaseNone;
@@ -262,10 +274,58 @@ static char const AKAudioCoordinatorQueueKey;
 - (BOOL)applyPlaybackForGame {
     AVAudioSession *session = AVAudioSession.sharedInstance;
     NSError *error = nil;
-    if (![session setCategory:AVAudioSessionCategoryPlayback
-                         mode:AVAudioSessionModeDefault
-                      options:0 error:&error]) return NO;
-    return [session setActive:YES error:&error];
+    _applyingPlayback = YES;
+    BOOL categoryOK = [session.category isEqualToString:AVAudioSessionCategoryPlayback] &&
+        [session.mode isEqualToString:AVAudioSessionModeDefault] &&
+        session.categoryOptions == AVAudioSessionCategoryOptionMixWithOthers;
+    if (!categoryOK) categoryOK = [session setCategory:AVAudioSessionCategoryPlayback
+        mode:AVAudioSessionModeDefault options:AVAudioSessionCategoryOptionMixWithOthers error:&error];
+    _playbackActive = categoryOK && [session setActive:YES error:&error];
+    _applyingPlayback = NO;
+    if (!_playbackActive) WKLog("audio", @"game playback activation failed: %@", error.localizedDescription);
+    [self publishGameGain];
+    return _playbackActive;
+}
+
+// Lower our output, not the video's. DuckOthers would do the opposite. iOS only
+// delivers secondary-audio hints to foreground sessions, so keep background game
+// audio quiet too, then re-read the hint when the game returns to the foreground.
+- (void)publishGameGain {
+    float gain = (_background || AVAudioSession.sharedInstance.secondaryAudioShouldBeSilencedHint) ? 0.35f : 1.0f;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [NSNotificationCenter.defaultCenter postNotificationName:AKGameAudioGainChanged
+            object:self userInfo:@{@"gain": @(gain)}];
+    });
+}
+
+- (void)publishPlaybackRecovery {
+    // Never call the adapter while holding the coordinator's transition queue:
+    // RemoteIO can ask CoreAudio for the session again during AudioOutputUnitStart.
+    dispatch_async(dispatch_get_main_queue(), ^{
+        __block BOOL wanted = NO;
+        [self onTheQueue:^{ wanted = self->_gameWantsPlayback && self->_playbackActive && !self->_pushToTalk && !self->_interrupted; }];
+        if (wanted) [NSNotificationCenter.defaultCenter postNotificationName:AKGameAudioRecovered object:self];
+    });
+}
+
+- (void)recoverPlayback:(NSUInteger)generation attempt:(NSUInteger)attempt {
+    if (generation != _recoveryGeneration || !_gameWantsPlayback || _pushToTalk || _interrupted) return;
+    _lease = AKAudioLeaseGame;
+    if ([self applyPlaybackForGame]) {
+        [self publishPlaybackRecovery];
+        WKLog("audio", @"game playback recovered (attempt %lu)", (unsigned long)attempt + 1);
+    } else if (attempt < 3) {
+        const double delays[] = {0.25, 1.0, 3.0};
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delays[attempt] * NSEC_PER_SEC)),
+            _transitions, ^{ [self recoverPlayback:generation attempt:attempt + 1]; });
+    }
+}
+
+- (void)resumeGamePlaybackClearingInterruption:(BOOL)clear {
+    dispatch_async(_transitions, ^{
+        if (clear) self->_interrupted = NO;
+        [self recoverPlayback:++self->_recoveryGeneration attempt:0];
+    });
 }
 
 // The launcher's policy: what the session is when nothing is running.
@@ -305,6 +365,7 @@ static char const AKAudioCoordinatorQueueKey;
 // activating - what the old code did after every dictation - takes the session away from the game
 // and from every other app for no reason.
 - (BOOL)releaseSession:(NSError **)error {
+    _playbackActive = NO;
     return [AVAudioSession.sharedInstance
             setActive:NO withOptions:AVAudioSessionSetActiveOptionNotifyOthersOnDeactivation
             error:error];
@@ -332,15 +393,20 @@ static char const AKAudioCoordinatorQueueKey;
     [center addObserverForName:AVAudioSessionInterruptionNotification object:nil
                          queue:NSOperationQueue.mainQueue usingBlock:^(NSNotification *note) {
         NSNumber *type = note.userInfo[AVAudioSessionInterruptionTypeKey];
-        if (type.unsignedIntegerValue == AVAudioSessionInterruptionTypeBegan)
+        if (!type) return;
+        if (type.unsignedIntegerValue == AVAudioSessionInterruptionTypeBegan) {
+            [weakSelf onTheQueue:^{
+                AKAudioSessionCoordinator *owner = weakSelf;
+                if (owner) { owner->_interrupted = YES; owner->_playbackActive = NO; ++owner->_recoveryGeneration; }
+            }];
             [weakSelf theSessionWasTaken:@"an interruption"];
-        else
-            [weakSelf theInterruptionEnded];
+        } else [weakSelf resumeGamePlaybackClearingInterruption:YES];
     }];
     [center addObserverForName:AVAudioSessionMediaServicesWereResetNotification object:nil
                          queue:NSOperationQueue.mainQueue usingBlock:^(NSNotification *note) {
         (void)note;
         [weakSelf theSessionWasTaken:@"the media services were reset"];
+        [weakSelf resumeGamePlaybackClearingInterruption:YES];
     }];
     [center addObserverForName:AVAudioSessionRouteChangeNotification object:nil
                          queue:NSOperationQueue.mainQueue usingBlock:^(NSNotification *note) {
@@ -349,6 +415,30 @@ static char const AKAudioCoordinatorQueueKey;
         // the input it was using disappearing does.
         if (reason.unsignedIntegerValue == AVAudioSessionRouteChangeReasonOldDeviceUnavailable)
             [weakSelf theSessionWasTaken:@"the route changed"];
+        // Category changes are generated by our own policy, not a route recovery.
+        if (reason.unsignedIntegerValue != AVAudioSessionRouteChangeReasonCategoryChange)
+            [weakSelf resumeGamePlaybackClearingInterruption:NO];
+    }];
+    for (NSNotificationName name in @[UIApplicationDidBecomeActiveNotification, UISceneDidActivateNotification]) {
+        [center addObserverForName:name object:nil queue:NSOperationQueue.mainQueue usingBlock:^(NSNotification *note) {
+            (void)note;
+            [weakSelf onTheQueue:^{ AKAudioSessionCoordinator *owner = weakSelf; if (owner) owner->_background = NO; }];
+            // iOS can omit interruption-ended when the app was suspended.
+            [weakSelf resumeGamePlaybackClearingInterruption:YES];
+        }];
+    }
+    [center addObserverForName:UIApplicationDidEnterBackgroundNotification object:nil
+        queue:NSOperationQueue.mainQueue usingBlock:^(NSNotification *note) {
+        (void)note;
+        [weakSelf onTheQueue:^{
+            AKAudioSessionCoordinator *owner = weakSelf;
+            if (owner) { owner->_background = YES; [owner publishGameGain]; }
+        }];
+    }];
+    [center addObserverForName:AVAudioSessionSilenceSecondaryAudioHintNotification object:nil
+        queue:NSOperationQueue.mainQueue usingBlock:^(NSNotification *note) {
+        (void)note;
+        [weakSelf onTheQueue:^{ [weakSelf publishGameGain]; }];
     }];
 }
 
@@ -369,17 +459,6 @@ static char const AKAudioCoordinatorQueueKey;
                       object:self userInfo:@{@"active": @NO}];
 }
 
-// An interruption ending is when the session can be taken again. The game's policy is restored only
-// if a game lease is held; nothing is forced while push to talk is recording.
-- (void)theInterruptionEnded {
-    [self onTheQueue:^{
-        if (self->_pushToTalk) return;
-        if (self->_gameWantsPlayback) {
-            BOOL ok = [self applyPlaybackForGame];
-            [self logTransitionFrom:@"game" to:@"game" result:ok error:nil];
-        }
-    }];
-}
 
 @end
 

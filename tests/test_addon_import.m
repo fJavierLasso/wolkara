@@ -213,6 +213,29 @@ int TestRealAddonImport(const char *fixtures, const char *temporary) {
         CHECK([fm createSymbolicLinkAtPath:linkPath withDestinationPath:headerPath error:&error], "symlink fixture");
         CHECK(!TKAddonReadTOCHeader(linkPath) && !TKAddonReadTOCHeader(root), "header reader rejects symlinks and directories");
 
+        // Generic fallback TOCs may be an intentional error stub. Select the
+        // current client's metadata without changing any bytes in the package.
+        NSString *flavorRoot=[root stringByAppendingPathComponent:@"Flavors/Interface/AddOns"];
+        CHECK([fm createDirectoryAtPath:flavorRoot withIntermediateDirectories:YES attributes:nil error:&error], "flavor sandbox");
+        TKAddonStore *flavorStore=[[TKAddonStore alloc] initWithAddOnsDirectory:flavorRoot product:@"wowf" gameVersion:@"1.60.1"];
+        NSURL *flavorZIP=[NSURL fileURLWithPath:[[NSString stringWithUTF8String:fixtures] stringByAppendingPathComponent:@"flavor.zip"]];
+        CHECK([flavorStore importZIPAtURL:flavorZIP error:&error], "import multi-client package");
+        CHECK([flavorStore.records.firstObject.name isEqual:@"Forever quests"] && [flavorStore.records.firstObject.version isEqual:@"12"], "Forever metadata beats unsupported stub and Camelot alias");
+        NSString *generic=[flavorRoot stringByAppendingPathComponent:@"Flavor/Flavor.toc"];
+        NSData *genericBytes=[NSData dataWithContentsOfFile:generic];
+        CHECK([flavorStore setDisabled:YES record:flavorStore.records.firstObject error:&error], "disable multi-client package");
+        CHECK([flavorStore.records.firstObject.name isEqual:@"Forever quests"], "disabled metadata still selects client");
+        CHECK([flavorStore setDisabled:NO record:flavorStore.records.firstObject error:&error], "restore multi-client package");
+        CHECK([genericBytes isEqual:[NSData dataWithContentsOfFile:generic]], "do not rewrite fallback manifest");
+        TKAddonStore *era=[[TKAddonStore alloc] initWithAddOnsDirectory:flavorRoot product:@"wow_classic_era" gameVersion:@"1.15.9"];
+        CHECK([era.records.firstObject.name isEqual:@"Era quests"], "switching clients selects matching interface metadata");
+        TKAddonStore *unknown=[[TKAddonStore alloc] initWithAddOnsDirectory:flavorRoot product:@"unknown" gameVersion:@"unknown"];
+        CHECK([unknown.records.firstObject.name isEqual:@"game client not supported"], "unknown clients retain generic fallback");
+        // Previously installed, unmanaged folders benefit without reinstalling.
+        CHECK([fm removeItemAtPath:[flavorRoot stringByAppendingPathComponent:@".wolkaraforever-addons.json"] error:&error], "remove fixture ownership only");
+        [flavorStore reload];
+        CHECK(!flavorStore.records.firstObject.managed && [flavorStore.records.firstObject.name isEqual:@"Forever quests"], "unmanaged flavor metadata");
+
         // --- format-1 -> format-2 migration, and recovery from an interrupted one
         NSString *legacyRoot = [root stringByAppendingPathComponent:@"Legacy/Interface/AddOns"];
         CHECK([fm createDirectoryAtPath:[legacyRoot stringByAppendingPathComponent:@"LegacyAddon"]

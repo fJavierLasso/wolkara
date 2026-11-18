@@ -61,15 +61,38 @@ NSString *TKAddonReadTOCHeader(NSString *path) {
     return [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] ?:
         [[NSString alloc] initWithData:data encoding:NSISOLatin1StringEncoding];
 }
-static NSString *TOC(NSString *folder) {
+static NSArray<NSString *> *Interfaces(NSString *toc);
+static NSString *TOC(NSString *folder, NSString *product, NSString *version) {
     NSArray *names=[[NSFileManager.defaultManager contentsOfDirectoryAtPath:folder error:NULL] sortedArrayUsingSelector:@selector(compare:)];
-    NSMutableString *combined=[NSMutableString new];
+    NSMutableArray<NSString *> *headers=[NSMutableArray new];
+    NSString *selected=nil;
+    NSInteger best=-1;
+    NSString *interface=TKAddonInterfaceForVersion(version);
+    NSString *base=folder.lastPathComponent;
     for (NSString *name in names) if ([name.pathExtension.lowercaseString isEqual:@"toc"]) {
-        NSString *path=[folder stringByAppendingPathComponent:name];
-        NSString *text=TKAddonReadTOCHeader(path);
-        if (text) [combined appendFormat:@"%@\n",text];
+        NSString *text=TKAddonReadTOCHeader([folder stringByAppendingPathComponent:name]);
+        if (!text) continue;
+        [headers addObject:text];
+        NSInteger score=[name isEqual:[base stringByAppendingPathExtension:@"toc"]] ? 10 : 0;
+        if (interface && [Interfaces(text) containsObject:interface]) score=20;
+        // Multi-client packages can deliberately put an "unsupported client"
+        // placeholder in Addon.toc. Forever loads its flavor TOC instead. Prefer
+        // the same metadata here, including after an existing package is reloaded.
+        if ([product isEqual:@"wowf"]) {
+            NSString *stem=name.stringByDeletingPathExtension;
+            if ([stem isEqual:[base stringByAppendingString:@"_Forever"]] ||
+                [stem isEqual:[base stringByAppendingString:@"-Forever"]]) score=40;
+            else if ([stem isEqual:[base stringByAppendingString:@"_Camelot"]] ||
+                     [stem isEqual:[base stringByAppendingString:@"-Camelot"]]) score=30;
+        }
+        if (score>best) { selected=text; best=score; }
     }
-    return combined.length ? combined : nil;
+    if (!selected) return nil;
+    // Keep every declared interface for compatibility advice. Only presentation
+    // metadata is reordered; no third-party file is rewritten or executed.
+    NSMutableString *combined=[NSMutableString stringWithFormat:@"%@\n",selected];
+    for (NSString *text in headers) if (text!=selected) [combined appendFormat:@"%@\n",text];
+    return combined;
 }
 NSString *TKAddonInterfaceForVersion(NSString *version) {
     NSArray<NSString *> *parts=[version componentsSeparatedByString:@"."];
@@ -243,7 +266,7 @@ BOOL TKAddonProviderIsCurseForge(NSDictionary *provider) {
         NSMutableArray *all = [NSMutableArray array];
         for (NSString *folder in copy[@"folders"]) {
             if (![folder isKindOfClass:NSString.class]) continue;
-            NSString *toc = TOC([_directory stringByAppendingPathComponent:folder]);
+            NSString *toc = TOC([_directory stringByAppendingPathComponent:folder],_product,_version);
             for (NSString *each in Interfaces(toc)) if (![all containsObject:each]) [all addObject:each];
         }
         if (![copy[@"tocInterface"] isKindOfClass:NSArray.class] || ![copy[@"tocInterface"] count])
@@ -298,7 +321,7 @@ BOOL TKAddonProviderIsCurseForge(NSDictionary *provider) {
         NSString *toc=nil;
         for (NSString *folder in item[@"folders"]) {
             if (!disabled) [owned addObject:folder];
-            if (!toc) toc=TOC([base stringByAppendingPathComponent:folder]);
+            if (!toc) toc=TOC([base stringByAppendingPathComponent:folder],_product,_version);
         }
         TKAddonRecord *record=[TKAddonRecord new];
         record.identifier=identifier;
@@ -316,7 +339,7 @@ BOOL TKAddonProviderIsCurseForge(NSDictionary *provider) {
     NSArray *names=[[NSFileManager.defaultManager contentsOfDirectoryAtPath:_directory error:NULL] sortedArrayUsingSelector:@selector(localizedStandardCompare:)];
     for (NSString *folder in names) {
         if ([folder hasPrefix:@"."] || [owned containsObject:folder]) continue;
-        NSString *toc=TOC([_directory stringByAppendingPathComponent:folder]);
+        NSString *toc=TOC([_directory stringByAppendingPathComponent:folder],_product,_version);
         if (!toc) continue;
         TKAddonRecord *record=[TKAddonRecord new];
         record.identifier=folder; record.uuid=folder;
@@ -355,7 +378,7 @@ BOOL TKAddonProviderIsCurseForge(NSDictionary *provider) {
         if (![name isKindOfClass:NSString.class] || !name.length || [name containsString:@"/"] ||
             [name isEqual:@"."] || [name isEqual:@".."])
             return Fail(error, [NSString stringWithFormat:@"%@ is not a usable add-on folder name.", name]);
-        NSString *toc = TOC([extract stringByAppendingPathComponent:name]);
+        NSString *toc = TOC([extract stringByAppendingPathComponent:name],_product,_version);
         if (!toc) return Fail(error, [NSString stringWithFormat:@"%@ has no readable .toc manifest.", name]);
         for (NSString *each in Interfaces(toc)) if (![all containsObject:each]) [all addObject:each];
     }
@@ -406,8 +429,8 @@ BOOL TKAddonProviderIsCurseForge(NSDictionary *provider) {
 - (NSArray<NSString *> *)foldersIn:(NSString *)extract root:(NSString **)outRoot error:(NSError **)error {
     NSArray *top=[[NSFileManager.defaultManager contentsOfDirectoryAtPath:extract error:error] sortedArrayUsingSelector:@selector(compare:)];NSMutableArray *folders=[NSMutableArray new];
     NSString *root = extract;
-    for(NSString *name in top){NSString *path=[extract stringByAppendingPathComponent:name];if(TOC(path))[folders addObject:name];}
-    if(!folders.count&&top.count==1){NSString *wrapper=[extract stringByAppendingPathComponent:top[0]];for(NSString *name in [NSFileManager.defaultManager contentsOfDirectoryAtPath:wrapper error:NULL])if(TOC([wrapper stringByAppendingPathComponent:name]))[folders addObject:name];if(folders.count)root=wrapper;}
+    for(NSString *name in top){NSString *path=[extract stringByAppendingPathComponent:name];if(TOC(path,_product,_version))[folders addObject:name];}
+    if(!folders.count&&top.count==1){NSString *wrapper=[extract stringByAppendingPathComponent:top[0]];for(NSString *name in [NSFileManager.defaultManager contentsOfDirectoryAtPath:wrapper error:NULL])if(TOC([wrapper stringByAppendingPathComponent:name],_product,_version))[folders addObject:name];if(folders.count)root=wrapper;}
     if (outRoot) *outRoot = root;
     return folders;
 }
@@ -456,7 +479,7 @@ BOOL TKAddonProviderIsCurseForge(NSDictionary *provider) {
     // for; the manifest kept saying the package was owned while its folder was gone.
     NSMutableArray<NSString *> *created=[NSMutableArray new];
     @try { if (![self prepareMutation:error]) return NO; for(NSString *name in folders)if([NSFileManager.defaultManager fileExistsAtPath:[_directory stringByAppendingPathComponent:name]])return Fail(error,[NSString stringWithFormat:@"%@ already exists; remove or disable the managed package first.",name]);
-        NSMutableArray *packages=[self mutablePackages];NSString *identifier=folders.firstObject;NSString *toc=TOC([root stringByAppendingPathComponent:identifier]);
+        NSMutableArray *packages=[self mutablePackages];NSString *identifier=folders.firstObject;NSString *toc=TOC([root stringByAppendingPathComponent:identifier],_product,_version);
         NSMutableDictionary *item = [@{ @"identifier":identifier,@"uuid":NSUUID.UUID.UUIDString,@"name":Value(toc,@"Title:")?:identifier,@"version":Value(toc,@"Version:")?:@"Unknown version",@"source":@"zip",@"archiveSHA256":Digest(archive),@"folders":folders,@"pinned":@NO,@"disabled":@NO,@"tocInterface":interfaces?:@[],@"compatibility":compatibility?:TKAddonCompatibilityUnverified } mutableCopy];
         NSDictionary *clean = CleanProvider(provider);
         if (clean) item[@"provider"] = clean;
@@ -586,7 +609,7 @@ BOOL TKAddonProviderIsCurseForge(NSDictionary *provider) {
             }
             // 3. Commit the manifest. Until this line the old record is still the truth, which
             //    is why the journal can always put the tree back.
-            NSString *toc = TOC([base stringByAppendingPathComponent:newFolders.firstObject ?: record.identifier]);
+            NSString *toc = TOC([base stringByAppendingPathComponent:newFolders.firstObject ?: record.identifier],_product,_version);
             item[@"folders"] = newFolders;
             if (Value(toc, @"Title:")) item[@"name"] = Value(toc, @"Title:");
             if (Value(toc, @"Version:")) item[@"version"] = Value(toc, @"Version:");
@@ -645,7 +668,7 @@ BOOL TKAddonProviderIsCurseForge(NSDictionary *provider) {
             if (record.folders.count != 1 || !SafeFolderName(record.folders.firstObject))
                 return Fail(error,@"This add-on does not name one safe top-level folder.");
             NSString *path=[_directory stringByAppendingPathComponent:record.folders.firstObject];
-            if (!TOC(path)) return Fail(error,@"The selected add-on folder no longer has a readable .toc manifest.");
+            if (!TOC(path,_product,_version)) return Fail(error,@"The selected add-on folder no longer has a readable .toc manifest.");
             if (![fm removeItemAtPath:path error:error]) return NO;
             success=YES; [self reloadUnlocked]; return YES;
         } @finally { TKWoWReleaseUpdateLock(lock); if(!success)[self reload]; }

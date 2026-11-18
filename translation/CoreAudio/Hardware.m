@@ -21,30 +21,7 @@ static TKWolkaraForeverPlaybackRequest playbackRequest(void) {
     dispatch_once(&once,^{ found=(TKWolkaraForeverPlaybackRequest)dlsym(RTLD_DEFAULT,"TKWolkaraForeverRequestGamePlayback"); });
     return found;
 }
-// The app declares the audio background mode, and iPadOS only honours it while the audio session is
-// active: that is what keeps a running game alive (and its connection up) when the user switches to
-// another app. An interruption ending, or a media services reset, is when the session can be asked
-// for again - asked for, never taken.
-static void keepSession(void) {
-    TKWolkaraForeverPlaybackRequest ask=playbackRequest();
-    if(ask) ask();
-}
-static void observeSession(void) {
-    static dispatch_once_t once;
-    dispatch_once(&once,^{
-        // AVFAudio notifications only: this adapter stays UIKit-free.
-        NSNotificationCenter *center=NSNotificationCenter.defaultCenter;
-        [center addObserverForName:AVAudioSessionInterruptionNotification object:nil queue:NSOperationQueue.mainQueue usingBlock:^(NSNotification *note) {
-            NSNumber *type=note.userInfo[AVAudioSessionInterruptionTypeKey];
-            if(type.unsignedIntegerValue==AVAudioSessionInterruptionTypeEnded) keepSession();
-        }];
-        [center addObserverForName:AVAudioSessionMediaServicesWereResetNotification object:nil queue:NSOperationQueue.mainQueue usingBlock:^(NSNotification *note) {
-            (void)note; keepSession();
-        }];
-    });
-}
 static NSString *outputName(void) {
-    observeSession();
     // Asked for, not taken. If the host declines - a dictation holds the session, or it has not asked
     // for playback yet - there is no output name to report, and that is the answer.
     TKWolkaraForeverPlaybackRequest ask=playbackRequest();

@@ -74,3 +74,12 @@ database_toc = (b'## Interface: 16001\n## Title: Database fixture\n## Version: 1
 archive('database-toc', [('Database/Database_Forever.toc', database_toc),
                          ('Database/Database_Camelot.toc', database_toc),
                          ('Database/main.lua', b'-- fixture\n')])
+
+# A real-world multi-client package uses a generic error placeholder, while the
+# selected game's suffix has its actual title/version. Never display the stub.
+archive('flavor', [
+    ('Flavor/Flavor.toc', b'## Interface: 00000\n## Title: game client not supported\n'),
+    ('Flavor/Flavor_Forever.toc', b'## Interface: 16001\n## Title: Forever quests\n## Version: 12\n'),
+    ('Flavor/Flavor_Camelot.toc', b'## Interface: 16001\n## Title: Legacy quests\n## Version: 11\n'),
+    ('Flavor/Flavor_Vanilla.toc', b'## Interface: 11509\n## Title: Era quests\n## Version: 10\n'),
+])
