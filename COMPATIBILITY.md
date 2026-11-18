@@ -43,8 +43,10 @@ retries. A real simulator RemoteIO callback resumes after a system-side stop,
 while explicitly stopped, uninitialized and disposed units remain stopped.
 CoreAudio property regression checks, 47 toolbar/dictation checks, ASan/UBSan gain
 and buffer-bound checks, the signed Release build and app-bundle checks pass.
-Physical mixing, audible recovery and route switching still require the user's
-Duo check; simulator callback progress is not proof of audible device output.
+After installing this build, the user confirmed the audio fix works on the
+physical Duo (2026-11-18). This is a user-confirmed recovery result, not a
+measurement of the gain ramp or validation of every audio route. Route switching
+and media-server-reset recovery remain unverified.
 
 The user also reported "game client not supported" beside Questie in the addon
 manager. The installed official Questie 12.10.0 package has that literal title
